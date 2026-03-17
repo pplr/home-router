@@ -1,0 +1,8 @@
+sstate-cache/
+downloads/
+*.swp
+*~
+build/cache
+build/tmp
+build/*.sock
+build/*.log
