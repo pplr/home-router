@@ -9,3 +9,6 @@
 [submodule "layers/bitbake"]
 	path = layers/bitbake
 	url = https://git.openembedded.org/bitbake
+[submodule "layers/meta-rauc"]
+	path = layers/meta-rauc
+	url = https://github.com/rauc/meta-rauc.git

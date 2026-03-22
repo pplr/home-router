@@ -1,0 +1,20 @@
+# short-description: A/B partition layout for Futro S920 with RAUC
+# long-description: GPT disk image with EFI boot, grubenv, dual rootfs (A/B),
+# and persistent data partition for RAUC-based updates.
+
+# Partition 1: EFI System Partition (GRUB + grub.cfg)
+part /boot --source bootimg_efi --sourceparams="loader=grub-efi" --ondisk sda --label boot --active --align 1024 --size 64M --use-uuid
+
+# Partition 2: GRUB environment for A/B slot state (written by RAUC)
+part --source rawcopy --sourceparams="file=grubenv.vfat" --ondisk sda --label grubenv --align 1024 --size 1M
+
+# Partition 3: Root filesystem slot A
+part / --source rootfs --ondisk sda --fstype=ext4 --label rootfs-a --align 1024 --size 1536M --use-uuid
+
+# Partition 4: Root filesystem slot B (empty, populated by RAUC)
+part --ondisk sda --fstype=ext4 --label rootfs-b --align 1024 --size 1536M
+
+# Partition 5: Persistent data (logs, config, certs)
+part /data --ondisk sda --fstype=ext4 --label data --align 1024 --size 256M
+
+bootloader --ptable gpt --timeout=0 --append="rootfstype=ext4 console=ttyS0,115200 console=tty0"

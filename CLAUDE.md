@@ -26,14 +26,58 @@ Note: `oe-init-build-env` changes the working directory to `build/`. Requires ~5
   - `openembedded-core` — core metadata and `oe-init-build-env` script (git submodule, `whinlatter` branch)
   - `meta-yocto` — Poky distro policy (`meta-poky`) and BSP (`meta-yocto-bsp`) (git submodule, `whinlatter` branch)
   - `bitbake` — build engine (git submodule, `whinlatter` branch)
+  - `meta-rauc` — RAUC update framework layer (git submodule, `master` branch)
   - `meta-futro-s920` — custom BSP layer for the Fujitsu Futro S920 (checked in, not a submodule)
 - **build/conf/** — build configuration (checked in):
   - `local.conf` — machine (`futro-s920` default), distro (`poky`), paths, sstate mirrors
-  - `bblayers.conf` — active layers: `meta`, `meta-poky`, `meta-yocto-bsp`, `meta-futro-s920`
+  - `bblayers.conf` — active layers: `meta`, `meta-poky`, `meta-yocto-bsp`, `meta-rauc`, `meta-futro-s920`
 - **downloads/**, **sstate-cache/** — gitignored build caches
 
 ## Key Configuration
 
 - `MACHINE` is set to `futro-s920` — custom machine config using `corei7-64` tune (SSE4.2, no AVX2) with EFI boot.
+- `INIT_MANAGER` is set to `systemd` — provides dependency-based boot ordering and native service management.
 - `DL_DIR` and `SSTATE_DIR` are configured to `../downloads` and `../sstate-cache` (repo-relative, outside `build/`).
 - Yocto Project sstate mirror and hash equivalence server are enabled for faster builds.
+- `DISTRO_FEATURES` includes `rauc` for A/B update support.
+
+## A/B Update System (RAUC)
+
+The image uses RAUC for safe, atomic A/B partition updates with automatic rollback.
+
+### Partition Layout (8GB SSD)
+
+| # | Label | Size | Type | Purpose |
+|---|-------|------|------|---------|
+| 1 | boot | 64 MiB | vfat | EFI System Partition (GRUB + grub.cfg) |
+| 2 | grubenv | 1 MiB | vfat | GRUB environment for A/B slot state |
+| 3 | rootfs-a | 1536 MiB | ext4 | Root filesystem slot A |
+| 4 | rootfs-b | 1536 MiB | ext4 | Root filesystem slot B |
+| 5 | data | 256 MiB | ext4 | Persistent data (logs, config, certs) |
+
+### Build Commands
+
+```bash
+source ./layers/openembedded-core/oe-init-build-env build
+bitbake core-image-minimal        # image with A/B layout
+bitbake futro-s920-bundle         # RAUC update bundle (.raucb)
+```
+
+### Update Workflow
+
+```bash
+rauc status                       # check slot status
+rauc install /tmp/update.raucb    # install to inactive slot
+reboot                            # boot into updated slot
+rauc status mark-good             # confirm slot is good
+```
+
+### Certificates
+
+Development CA and signing keys are in `layers/meta-futro-s920/files/rauc-keys/`. The CA cert (`ca.cert.pem`) is installed on the target as the keyring. The signing key (`development-1.key.pem`) stays on the build host.
+
+### Notes
+
+- Device paths in `system.conf` and `grub.cfg` use `PARTLABEL`/`by-partlabel` references, so the image works on both real hardware (`/dev/sda`) and QEMU with virtio (`/dev/vda`) without changes.
+- `rauc-mark-good.service` systemd unit auto-marks the booted slot as good after successful boot.
+- The `meta-rauc` warning about `meta-filesystems` can be ignored (only needed for casync/FUSE).
