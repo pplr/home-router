@@ -1,4 +1,35 @@
-IMAGE_INSTALL:append = " rauc sudo"
+IMAGE_INSTALL:append = " rauc sudo systemd-networkd futro-network-conf openssh-sshd kernel-modules kbd kbd-consolefonts kbd-keymaps futro-console-conf"
+
+# Show boot messages instead of splash screen
+SPLASH = ""
+
+# Replacements for busybox applets removed by the coreutils switch
+IMAGE_INSTALL:append = " \
+    procps \
+    iproute2 \
+    util-linux \
+    grep \
+    sed \
+    gawk \
+    findutils \
+    tar \
+    gzip \
+    bzip2 \
+    xz \
+    less \
+    diffutils \
+    patch \
+    iputils-ping \
+    wget \
+    psmisc \
+    kmod \
+    ncurses-tools \
+    vim-tiny \
+    bind-utils \
+    which \
+    unzip \
+    cpio \
+"
 
 IMAGE_FSTYPES:append = " ext4"
 

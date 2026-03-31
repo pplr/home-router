@@ -1,0 +1,9 @@
+[Match]
+Name=wan0
+
+[Network]
+DHCP=ipv4
+IPMasquerade=ipv4
+
+[DHCPv4]
+UseDNS=false

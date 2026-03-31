@@ -1,0 +1,13 @@
+[Match]
+Name=br-lan
+
+[Network]
+Address=10.0.0.1/24
+IPForward=ipv4
+DHCPServer=yes
+
+[DHCPServer]
+PoolOffset=100
+PoolSize=155
+DNS=10.0.0.1
+DefaultLeaseTimeSec=3600

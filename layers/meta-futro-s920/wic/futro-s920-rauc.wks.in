@@ -1,0 +1,20 @@
+# short-description: A/B partition layout for Futro S920 with RAUC
+# long-description: GPT disk image with EFI boot, grubenv, dual rootfs (A/B),
+# and persistent data partition for RAUC-based updates.
+
+# Partition 1: EFI System Partition (GRUB + grub.cfg)
+part /boot --source bootimg_efi --sourceparams="loader=grub-efi" --ondisk sda --label boot --active --align 1024 --fixed-size 64M --part-type=C12A7328-F81F-11D2-BA4B-00A0C93EC93B --mkfs-extraopts="-F 32 -S 512" --uuid=f7200001-a001-4000-8001-000000000001 --fsuuid=F7200001
+
+# Partition 2: GRUB environment for A/B slot state (written by RAUC)
+part --source rawcopy --sourceparams="file=grubenv.vfat" --ondisk sda --label grubenv --align 1024 --fixed-size 1M --uuid=f7200002-a001-4000-8001-000000000002
+
+# Partition 3: Root filesystem slot A
+part / --source rootfs --ondisk sda --fstype=ext4 --label rootfs-a --align 1024 --fixed-size 1024M --no-fstab-update --uuid=f7200003-a001-4000-8001-000000000003
+
+# Partition 4: Root filesystem slot B (empty, populated by RAUC)
+part --ondisk sda --fstype=ext4 --label rootfs-b --align 1024 --fixed-size 1024M --uuid=f7200004-a001-4000-8001-000000000004
+
+# Partition 5: Persistent data (logs, config, certs)
+part /data --ondisk sda --fstype=ext4 --label data --align 1024 --size 5100M --uuid=f7200005-a001-4000-8001-000000000005
+
+bootloader --ptable gpt --timeout=3 --configfile="${LAYERDIR_meta-futro-s920}/recipes-bsp/grub/futro-grubconf/grub.cfg" --append="rootfstype=ext4 console=ttyS0,115200 console=tty0"

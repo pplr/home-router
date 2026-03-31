@@ -20,7 +20,7 @@ do_compile() {
 
     # Create 1 MiB vfat image containing grubenv
     dd if=/dev/zero of=${WORKDIR}/grubenv.vfat bs=1024 count=1024
-    mkfs.vfat -n grubenv ${WORKDIR}/grubenv.vfat
+    mkfs.vfat -n grubenv -i F7200002 ${WORKDIR}/grubenv.vfat
     mcopy -i ${WORKDIR}/grubenv.vfat ${WORKDIR}/grubenv ::/grubenv
 }
 

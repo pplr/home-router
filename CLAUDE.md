@@ -51,9 +51,9 @@ The image uses RAUC for safe, atomic A/B partition updates with automatic rollba
 |---|-------|------|------|---------|
 | 1 | boot | 64 MiB | vfat | EFI System Partition (GRUB + grub.cfg) |
 | 2 | grubenv | 1 MiB | vfat | GRUB environment for A/B slot state |
-| 3 | rootfs-a | 1536 MiB | ext4 | Root filesystem slot A |
-| 4 | rootfs-b | 1536 MiB | ext4 | Root filesystem slot B |
-| 5 | data | 256 MiB | ext4 | Persistent data (logs, config, certs) |
+| 3 | rootfs-a | 1024 MiB | ext4 | Root filesystem slot A |
+| 4 | rootfs-b | 1024 MiB | ext4 | Root filesystem slot B |
+| 5 | data | 5100 MiB | ext4 | Persistent data (logs, config, certs) |
 
 ### Build Commands
 
@@ -61,6 +61,18 @@ The image uses RAUC for safe, atomic A/B partition updates with automatic rollba
 source ./layers/openembedded-core/oe-init-build-env build
 bitbake core-image-minimal        # image with A/B layout
 bitbake futro-s920-bundle         # RAUC update bundle (.raucb)
+```
+
+### Initial Flash (from USB boot)
+
+Boot the Futro S920 from a [SystemRescue](https://www.system-rescue.org/) USB stick, then:
+
+```bash
+# Decompress and write the image to the mSATA SSD
+zstdcat core-image-minimal-futro-s920.wic.zst | dd of=/dev/sda bs=4M status=progress
+
+# Fix GPT backup header (required after dd to a larger disk)
+gdisk /dev/sda    # type 'w' then 'Y' to rewrite the partition table
 ```
 
 ### Update Workflow
@@ -81,3 +93,10 @@ Development CA and signing keys are in `layers/meta-futro-s920/files/rauc-keys/`
 - Device paths in `system.conf` and `grub.cfg` use `PARTLABEL`/`by-partlabel` references, so the image works on both real hardware (`/dev/sda`) and QEMU with virtio (`/dev/vda`) without changes.
 - `rauc-mark-good.service` systemd unit auto-marks the booted slot as good after successful boot.
 - The `meta-rauc` warning about `meta-filesystems` can be ignored (only needed for casync/FUSE).
+
+
+### Hardware
+
+Onboard ethernet device: 0000:05:00.0
+PCI ethernet board port 1: 0000:03:00.0
+PCI ethernet board port 2: 0000:04:00.0
