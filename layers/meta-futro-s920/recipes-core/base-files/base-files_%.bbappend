@@ -1,3 +1,3 @@
 FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 
-dirs755 += "/data /grubenv"
+dirs755 += "/data"

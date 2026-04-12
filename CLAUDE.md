@@ -49,8 +49,10 @@ The image uses RAUC for safe, atomic A/B partition updates with automatic rollba
 
 | # | Label | Size | Type | Purpose |
 |---|-------|------|------|---------|
-| 1 | boot | 64 MiB | vfat | EFI System Partition (GRUB + grub.cfg) |
-| 2 | grubenv | 1 MiB | vfat | GRUB environment for A/B slot state |
+| # | Label | Size | Type | Purpose |
+|---|-------|------|------|---------|
+| 1 | boot | 64 MiB | vfat | EFI System Partition (barebox.efi + state.dtb) |
+| 2 | state | 1 MiB | raw | Barebox state backend (bootchooser persistent state) |
 | 3 | rootfs-a | 1024 MiB | ext4 | Root filesystem slot A |
 | 4 | rootfs-b | 1024 MiB | ext4 | Root filesystem slot B |
 | 5 | data | 5100 MiB | ext4 | Persistent data (logs, config, certs) |
@@ -90,10 +92,31 @@ Development CA and signing keys are in `layers/meta-futro-s920/files/rauc-keys/`
 
 ### Notes
 
-- Device paths in `system.conf` and `grub.cfg` use `PARTLABEL`/`by-partlabel` references, so the image works on both real hardware (`/dev/sda`) and QEMU with virtio (`/dev/vda`) without changes.
+- Device paths in `system.conf` use `PARTLABEL`/`by-partlabel` references, so the image works on both real hardware (`/dev/sda`) and QEMU with virtio (`/dev/vda`) without changes.
 - `rauc-mark-good.service` systemd unit auto-marks the booted slot as good after successful boot.
 - The `meta-rauc` warning about `meta-filesystems` can be ignored (only needed for casync/FUSE).
 
+## Barebox Bootloader
+
+Barebox runs as an EFI payload, managing A/B slot selection via the bootchooser framework.
+
+### Key Files
+
+- `recipes-bsp/barebox/barebox.bbappend` — builds barebox with `efi_defconfig`, compiles `state.dtb`, deploys both
+- `recipes-bsp/barebox/barebox/bootchooser.cfg` — kconfig fragment enabling bootchooser + state
+- `recipes-bsp/barebox/barebox/state.dts` — state description (compiled to DTB, placed on ESP)
+- `recipes-bsp/barebox/barebox/env/boot/system0` / `system1` — boot scripts for each slot
+- `recipes-bsp/barebox/barebox/env/nv/bootchooser.*` — bootchooser nv variables
+
+### Barebox Pitfalls
+
+**Global variable syntax in boot scripts:** Use `global foo="value"` (command with space), NOT `global.foo="value"` (dot assignment). The dot syntax is a direct variable assignment that silently fails if the parameter doesn't exist yet — causing arguments like `console=` to be missing from the kernel command line with no error.
+
+**State backend wiring (state.dts):** Use a `fixed-partitions` node with a `partuuid` property pointing at the state partition's GPT partition entry UUID. Do NOT use `barebox,storage-by-uuid` (`CONFIG_STORAGE_BY_ALIAS`) — it creates link cdevs that trigger `BUG_ON(cdev->link)` in `cdev_readlink()` (fs/devfs-core.c:62) when a link-to-link chain forms. The `fixed-partitions` + `partuuid` approach makes `__of_cdev_find()` (drivers/of/of_path.c:65-71) call `cdev_by_partuuid()` directly, bypassing the link mechanism entirely. The `partuuid` must match the `--uuid=` of the state partition in the wks file.
+
+**bootchooser.state_prefix format:** Must be `<state_device>.<inner_prefix>` (e.g. `state.bootstate`). Barebox splits on the first `.` at `common/bootchooser.c:371` — left side is passed to `state_by_name()`, right side is the variable prefix within the state. If the state DTS node is named `state` and the container is `bootstate`, the prefix must be `state.bootstate`.
+
+**Kconfig fragments:** Symbols are merged via `merge_config.sh` on top of `BAREBOX_CONFIG` (e.g. `efi_defconfig`). Always verify symbols exist in the barebox source Kconfig before adding — non-existent symbols (e.g. `CONFIG_EFI_DEVICETREE`) are silently ignored. Check the built config: `grep SYMBOL tmp/work/.../barebox/.../build/.config`.
 
 ### Hardware
 

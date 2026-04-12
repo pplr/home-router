@@ -1,0 +1,8 @@
+#!/bin/sh
+
+global linux.bootargs.dyn.root="root=PARTUUID=f7200004-a001-4000-8001-000000000004 rootfstype=ext4 rootwait"
+global linux.bootargs.dyn.console="console=ttyS0,115200 console=tty0"
+
+mkdir -p /mnt/rootfs-b
+mount /dev/disk0.3 /mnt/rootfs-b
+bootm /mnt/rootfs-b/boot/bzImage

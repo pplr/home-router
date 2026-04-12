@@ -1,0 +1,99 @@
+/*
+ * Barebox state description for the Futro S920 RAUC A/B setup.
+ *
+ * Loaded by barebox's EFI payload (efi_late_init) from
+ * /boot/EFI/barebox/state.dtb on the ESP.
+ *
+ * Backend resolution: the state node's backend phandle points at
+ * state_part, which sits under a "fixed-partitions" node and carries
+ * a partuuid property.  When state_new_from_node() calls of_cdev_find()
+ * on the backend node, __of_cdev_find() (drivers/of/of_path.c:65-71)
+ * detects the fixed-partitions parent and resolves the partition
+ * directly via cdev_by_partuuid() — no intermediate link cdev is
+ * created, avoiding the BUG_ON in cdev_readlink().
+ *
+ * The partuuid must match the GPT partition entry UUID of the state
+ * partition (partition 2 in futro-s920-rauc.wks.in).
+ *
+ * Keep the bootstate variable offsets stable: they are written by
+ * barebox on the target and read/written by `barebox-state` from the
+ * running Linux userland (and by RAUC via its barebox-state handler).
+ */
+
+/dts-v1/;
+
+/ {
+	#address-cells = <1>;
+	#size-cells = <1>;
+
+	aliases {
+		state = &state;
+	};
+
+	partitions {
+		compatible = "fixed-partitions";
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		state_part: partition@0 {
+			reg = <0x0 0x0>;
+			partuuid = "f7200002-a001-4000-8001-000000000002";
+			label = "state";
+		};
+	};
+
+	state: state {
+		#address-cells = <1>;
+		#size-cells = <1>;
+		compatible = "barebox,state";
+		magic = <0x4d433230>;
+		backend-type = "raw";
+		backend = <&state_part>;
+		backend-storage-type = "direct";
+		backend-stridesize = <64>;
+
+		bootstate {
+			#address-cells = <1>;
+			#size-cells = <1>;
+
+			last_chosen@0 {
+				reg = <0x0 0x4>;
+				type = "uint32";
+			};
+
+			system0 {
+				#address-cells = <1>;
+				#size-cells = <1>;
+
+				remaining_attempts@4 {
+					reg = <0x4 0x4>;
+					type = "uint32";
+					default = <3>;
+				};
+
+				priority@8 {
+					reg = <0x8 0x4>;
+					type = "uint32";
+					default = <20>;
+				};
+			};
+
+			system1 {
+				#address-cells = <1>;
+				#size-cells = <1>;
+
+				remaining_attempts@c {
+					reg = <0xc 0x4>;
+					type = "uint32";
+					default = <3>;
+				};
+
+				priority@10 {
+					reg = <0x10 0x4>;
+					type = "uint32";
+					default = <10>;
+				};
+			};
+		};
+	};
+};
