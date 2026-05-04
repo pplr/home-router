@@ -1,4 +1,4 @@
-IMAGE_INSTALL:append = " rauc sudo systemd-networkd futro-network-conf openssh-sshd kernel-modules kbd kbd-consolefonts kbd-keymaps futro-console-conf"
+IMAGE_INSTALL:append = " rauc sudo systemd-networkd futro-network-conf openssh-sshd kernel-modules kbd kbd-consolefonts kbd-keymaps futro-console-conf linux-firmware-amdgpu fbset"
 
 # Show boot messages instead of splash screen
 SPLASH = ""
@@ -35,7 +35,7 @@ IMAGE_FSTYPES:append = " ext4"
 
 IMAGE_CLASSES += "extrausers"
 EXTRA_USERS_PARAMS = "\
-    useradd -m -s /bin/sh -G sudo -p '\$6\$t6sjNgqbM7cJxgyY\$0ju1OPcLUWQ2fRuFjvRzxj87nOr8kgBlFIfArdcWq/aJgmiNBfqWxU9VcP4oruPcRLfL4b.rw57ciXEg3jNv50' pplr; \
+    useradd -m -s /bin/sh -G sudo,adm -p '\$6\$t6sjNgqbM7cJxgyY\$0ju1OPcLUWQ2fRuFjvRzxj87nOr8kgBlFIfArdcWq/aJgmiNBfqWxU9VcP4oruPcRLfL4b.rw57ciXEg3jNv50' pplr; \
     passwd-expire pplr; \
 "
 

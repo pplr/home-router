@@ -48,7 +48,8 @@ exec qemu-system-x86_64 \
     -m "$MEMORY" \
     -drive file="$WIC_IMG",format=raw,if=virtio \
     -bios "$OVMF_FW" \
-    -nographic \
+    -vga std \
+    -serial mon:stdio \
     -device pcie-root-port,id=rp1,bus=pcie.0,addr=0x2,chassis=1 \
     -device pcie-root-port,id=rp2,bus=pcie.0,addr=0x3,chassis=2 \
     -device pcie-root-port,id=rp3,bus=pcie.0,addr=0x4,chassis=3 \

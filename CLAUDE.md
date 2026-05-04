@@ -49,8 +49,6 @@ The image uses RAUC for safe, atomic A/B partition updates with automatic rollba
 
 | # | Label | Size | Type | Purpose |
 |---|-------|------|------|---------|
-| # | Label | Size | Type | Purpose |
-|---|-------|------|------|---------|
 | 1 | boot | 64 MiB | vfat | EFI System Partition (barebox.efi + state.dtb) |
 | 2 | state | 1 MiB | raw | Barebox state backend (bootchooser persistent state) |
 | 3 | rootfs-a | 1024 MiB | ext4 | Root filesystem slot A |
@@ -79,8 +77,25 @@ gdisk /dev/sda    # type 'w' then 'Y' to rewrite the partition table
 
 ### Update Workflow
 
+**1. Build the RAUC bundle on the host:**
+
 ```bash
-rauc status                       # check slot status
+source ./layers/openembedded-core/oe-init-build-env build
+bitbake futro-s920-bundle
+```
+
+The bundle is output to `build/tmp/deploy/images/futro-s920/futro-s920-bundle-futro-s920.raucb`.
+
+**2. Transfer the bundle to the device:**
+
+```bash
+scp tmp/deploy/images/futro-s920/futro-s920-bundle-futro-s920.raucb root@<device-ip>:/tmp/update.raucb
+```
+
+**3. Install and reboot on the device:**
+
+```bash
+rauc status                       # check current slot status
 rauc install /tmp/update.raucb    # install to inactive slot
 reboot                            # boot into updated slot
 rauc status mark-good             # confirm slot is good
@@ -90,9 +105,15 @@ rauc status mark-good             # confirm slot is good
 
 Development CA and signing keys are in `layers/meta-futro-s920/files/rauc-keys/`. The CA cert (`ca.cert.pem`) is installed on the target as the keyring. The signing key (`development-1.key.pem`) stays on the build host.
 
+### RAUC Pitfalls
+
+**Slot `bootname` must match bootchooser target names:** In `system.conf`, each slot's `bootname` must exactly match the corresponding barebox bootchooser target name (e.g. `system0`, `system1` — as defined in `nv/bootchooser.targets`). Do NOT use arbitrary names like `A`/`B`. When RAUC queries barebox state, `last_chosen` returns the bootchooser target name; if no slot's `bootname` matches, RAUC fails with: `Failed to determine slot states: Did not find booted slot (matching 'system0')`.
+
+**ESP must be mounted for `barebox-state` on x86:** The `barebox-state` userspace tool (dt-utils) reads the state DTB from the filesystem. On x86 EFI (no `/proc/device-tree`), it relies on `state.dtb` being accessible at `/boot/EFI/barebox/state.dtb`. The ESP must be mounted at `/boot` in fstab, otherwise `barebox-state` fails with: `Unable to read devicetree. No such file or directory`. RAUC depends on `barebox-state` to determine slot states.
+
 ### Notes
 
-- Device paths in `system.conf` use `PARTLABEL`/`by-partlabel` references, so the image works on both real hardware (`/dev/sda`) and QEMU with virtio (`/dev/vda`) without changes.
+- Device paths in `system.conf` use `PARTUUID`/`by-partuuid` references, so the image works on both real hardware (`/dev/sda`) and QEMU with virtio (`/dev/vda`) without changes.
 - `rauc-mark-good.service` systemd unit auto-marks the booted slot as good after successful boot.
 - The `meta-rauc` warning about `meta-filesystems` can be ignored (only needed for casync/FUSE).
 
