@@ -117,6 +117,41 @@ Development CA and signing keys are in `layers/meta-futro-s920/files/rauc-keys/`
 - `rauc-mark-good.service` systemd unit auto-marks the booted slot as good after successful boot.
 - The `meta-rauc` warning about `meta-filesystems` can be ignored (only needed for casync/FUSE).
 
+## Static Configuration & Persistent State
+
+All device configuration is managed statically in this repo and baked into the image at build time — there is no on-device configuration. Anything mutable in the rootfs would be wiped on the next RAUC slot swap, so the model is: configuration is static-from-recipe; operational state lives on `/data`.
+
+### Out-of-tree secrets
+
+Secrets baked into the image (password hash, SSH host keys, machine-id) live under `layers/meta-futro-s920/files/secrets/` which is **gitignored** (only `README.md` is tracked). Recipes read these at parse / `do_install` time via the `SECRETS_DIR` variable defined in `meta-futro-s920/conf/layer.conf`. Missing files trigger `bb.fatal` with the expected path — see `files/secrets/README.md` for generation commands.
+
+| Secret | Consumer | Generated with |
+|---|---|---|
+| `pplr.hash` | `core-image-minimal.bbappend` (extrausers) | `mkpasswd -m sha512crypt -R 500000` |
+| `machine-id` | `base-files_%.bbappend` | `python3 -c "import uuid; print(uuid.uuid4().hex)"` |
+| `ssh/ssh_host_{ed25519,rsa}_key{,.pub}` | `openssh_%.bbappend` | `ssh-keygen -t {ed25519,rsa} -N '' -f ...` |
+
+To rotate any secret: regenerate the file, rebuild, deploy via RAUC. Hostname (`home-router`) is *not* a secret and is committed at `recipes-core/base-files/base-files/hostname`.
+
+### Persistent operational state on /data
+
+Two pieces of operational state are bind-mounted from `/data` so they survive A/B updates. They are *not* configuration — they're state generated at runtime that we want to keep across slot swaps.
+
+| Bind mount | Purpose |
+|---|---|
+| `/data/var/log/journal` → `/var/log/journal` | Persistent systemd journal (`Storage=persistent` via journald drop-in) |
+| `/data/var/lib/systemd/network` → `/var/lib/systemd/network` | DHCP server leases for connected LAN clients |
+
+Source dirs on `/data` are created on first mount by `futro-data-prep.service` (oneshot, ordered between `data.mount` and the bind mounts via `x-systemd.requires=` in fstab). Provided by the `futro-persistent-state` recipe in `recipes-core/futro-persistent-state/`.
+
+### Configuration Pitfalls
+
+**`passwd-expire` is poison with A/B updates:** the `extrausers` directive `passwd-expire <user>;` forces a password change on first login. With a static-rootfs A/B model the new hash lives only in the active slot's `/etc/shadow` and is wiped on the next RAUC swap, so the user gets prompted to change password on every update. Solution: bake a real hash via the secrets mechanism and **do not** use `passwd-expire`.
+
+**fstab bind mounts need ordering:** `data.mount` and any `/data/...` bind mount in fstab both target `local-fs.target`. Without explicit ordering the bind mount can fire before the source directory exists. Use `x-systemd.requires=futro-data-prep.service` on the bind mount entry — that pulls in the oneshot which creates source dirs after `data.mount` and before journald starts.
+
+**`set -u` breaks `oe-init-build-env`:** sourcing the init script under bash `set -u` (nounset) dies on `BBSERVER: unbound variable` (line 29) before bitbake reaches the PATH. Use `set -eo pipefail` (no `u`) when scripting bitbake invocations.
+
 ## Barebox Bootloader
 
 Barebox runs as an EFI payload, managing A/B slot selection via the bootchooser framework.

@@ -1,4 +1,4 @@
-IMAGE_INSTALL:append = " rauc sudo systemd-networkd futro-network-conf openssh-sshd kernel-modules kbd kbd-consolefonts kbd-keymaps futro-console-conf linux-firmware-amdgpu fbset"
+IMAGE_INSTALL:append = " rauc sudo systemd-networkd futro-network-conf futro-persistent-state openssh-sshd kernel-modules kbd kbd-consolefonts kbd-keymaps futro-console-conf linux-firmware-amdgpu fbset"
 
 # Show boot messages instead of splash screen
 SPLASH = ""
@@ -34,10 +34,22 @@ IMAGE_INSTALL:append = " \
 IMAGE_FSTYPES:append = " ext4"
 
 IMAGE_CLASSES += "extrausers"
-EXTRA_USERS_PARAMS = "\
-    useradd -m -s /bin/sh -G sudo,adm -p '\$6\$t6sjNgqbM7cJxgyY\$0ju1OPcLUWQ2fRuFjvRzxj87nOr8kgBlFIfArdcWq/aJgmiNBfqWxU9VcP4oruPcRLfL4b.rw57ciXEg3jNv50' pplr; \
-    passwd-expire pplr; \
-"
+
+# Password hash for `pplr` is read from an out-of-tree, gitignored file at parse
+# time. See layers/meta-futro-s920/files/secrets/README.md for generation.
+# Drop `passwd-expire`: with static config the baked hash *is* the live password,
+# so a forced first-login change would just be wiped on the next RAUC update.
+def read_secret(d, name):
+    import os
+    path = os.path.join(d.getVar('SECRETS_DIR'), name)
+    if not os.path.exists(path):
+        bb.fatal("Missing secret '%s' (expected at %s). See files/secrets/README.md." % (name, path))
+    with open(path) as f:
+        return f.read().strip()
+
+PPLR_PASSWD_HASH := "${@read_secret(d, 'pplr.hash')}"
+
+EXTRA_USERS_PARAMS = "useradd -m -s /bin/sh -G sudo,adm -p '${PPLR_PASSWD_HASH}' pplr;"
 
 remove_shadow_backups() {
     rm -f ${IMAGE_ROOTFS}${sysconfdir}/shadow- \

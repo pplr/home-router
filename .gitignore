@@ -6,3 +6,8 @@ build/cache
 build/tmp
 build/*.sock
 build/*.log
+
+# Out-of-tree secrets baked into the image at build time.
+# README.md is the only file in this directory that's tracked.
+layers/meta-futro-s920/files/secrets/*
+!layers/meta-futro-s920/files/secrets/README.md

@@ -7,3 +7,9 @@ tmpfs            /run           tmpfs   mode=0755,nodev,nosuid,strictatime 0 0
 tmpfs            /var/volatile  tmpfs   defaults             0       0
 PARTUUID=f7200001-a001-4000-8001-000000000001  /boot     vfat  defaults,noatime  0  2
 PARTUUID=f7200005-a001-4000-8001-000000000005  /data     ext4  defaults,noatime  0  2
+
+# Bind operational state from /data so it survives A/B updates.
+# x-systemd.requires=futro-data-prep.service ensures the source dirs are
+# created (with correct ownership) before the bind mount runs.
+/data/var/log/journal           /var/log/journal           none  bind,x-systemd.requires=futro-data-prep.service,nofail  0  0
+/data/var/lib/systemd/network   /var/lib/systemd/network   none  bind,x-systemd.requires=futro-data-prep.service,nofail  0  0

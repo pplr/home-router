@@ -1,0 +1,16 @@
+[Unit]
+Description=Create /data subdirs for persistent state bind mounts
+DefaultDependencies=no
+RequiresMountsFor=/data
+After=data.mount
+Before=var-log-journal.mount var-lib-systemd-network.mount systemd-journald.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/mkdir -p /data/var/log/journal /data/var/lib/systemd/network
+ExecStart=/bin/chmod 2755 /data/var/log/journal
+ExecStart=/bin/chgrp systemd-journal /data/var/log/journal
+
+[Install]
+WantedBy=local-fs.target
