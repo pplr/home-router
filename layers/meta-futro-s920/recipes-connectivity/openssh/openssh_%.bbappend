@@ -21,3 +21,19 @@ do_install:append() {
     install -m 0600 ${UNPACKDIR}/ssh_host_rsa_key         ${D}${sysconfdir}/ssh/ssh_host_rsa_key
     install -m 0644 ${UNPACKDIR}/ssh_host_rsa_key.pub     ${D}${sysconfdir}/ssh/ssh_host_rsa_key.pub
 }
+
+# OE-core's openssh recipe defines FILES:${PN}-sshd as an *explicit* list (see
+# openssh.inc — sbindir/sshd, sshd_config, moduli, sshd_check_keys, …). Files
+# we add under /etc/ssh/ in our do_install:append therefore fall through to
+# the `openssh` meta-package's catch-all FILES glob. We install only
+# `openssh-sshd` in core-image-minimal.bbappend, so without an explicit
+# reclaim our shipped host keys and lan-only.conf are silently dropped from
+# the image, and sshdgenkeys.service regenerates fresh random keys on every
+# first boot of a new RAUC slot (defeating the point of baking them in).
+FILES:${PN}-sshd += " \
+    ${sysconfdir}/ssh/ssh_host_ed25519_key \
+    ${sysconfdir}/ssh/ssh_host_ed25519_key.pub \
+    ${sysconfdir}/ssh/ssh_host_rsa_key \
+    ${sysconfdir}/ssh/ssh_host_rsa_key.pub \
+    ${sysconfdir}/ssh/sshd_config.d/lan-only.conf \
+"
