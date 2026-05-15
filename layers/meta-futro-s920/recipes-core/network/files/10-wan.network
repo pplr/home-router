@@ -4,6 +4,15 @@ Name=wan0
 [Network]
 DHCP=ipv4
 IPMasquerade=ipv4
+IPv4Forwarding=yes
+IPv6Forwarding=yes
+# Accept the Freebox's RA on WAN so we learn a GUA and default IPv6 route.
+# IPv6AcceptRA defaults to no when IPv6Forwarding=yes — enable it explicitly.
+IPv6AcceptRA=yes
 
 [DHCPv4]
+UseDNS=false
+
+[IPv6AcceptRA]
+# Don't let the Freebox's RDNSS override our DoT setup in resolved.
 UseDNS=false

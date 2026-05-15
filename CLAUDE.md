@@ -150,7 +150,45 @@ Source dirs on `/data` are created on first mount by `futro-data-prep.service` (
 
 **fstab bind mounts need ordering:** `data.mount` and any `/data/...` bind mount in fstab both target `local-fs.target`. Without explicit ordering the bind mount can fire before the source directory exists. Use `x-systemd.requires=futro-data-prep.service` on the bind mount entry — that pulls in the oneshot which creates source dirs after `data.mount` and before journald starts.
 
+**`useradd -p` hash dollars get eaten by shell expansion:** `extrausers.bbclass` opens its task function with `user_group_settings="${EXTRA_USERS_PARAMS}"` — a *double-quoted* shell assignment. Inside that, the single quotes around `'${PPLR_PASSWD_HASH}'` in the recipe are inert: bash sees the SHA-512 crypt hash (`$6$rounds=…$<salt>$<hash>`) as a sequence of `$NAME` references and substitutes empty strings, mangling the hash before `useradd` ever runs. Symptom: SSH refuses the (correct) password and `/etc/shadow` contains a truncated hash like `pplr:=500000.…`. Fix: pre-escape `$` in Python before bitbake substitution — `read_secret(...).replace('$', r'\$')` — so the literal `\$` in the generated shell line survives the assignment as a bare `$`.
+
 **`set -u` breaks `oe-init-build-env`:** sourcing the init script under bash `set -u` (nounset) dies on `BBSERVER: unbound variable` (line 29) before bitbake reaches the PATH. Use `set -eo pipefail` (no `u`) when scripting bitbake invocations.
+
+## Networking
+
+systemd-networkd-managed three-NIC setup: `wan0` (PCI `04:00.0`) faces the Freebox, `lan0` (`03:00.0`) and `lan1` (`05:00.0`) are bridged into `br-lan` (10.0.0.1/24). DHCPv4 server runs on `br-lan`; DNS is systemd-resolved with DoT to Cloudflare. Config files live in `recipes-core/network/files/` and are installed by `futro-network-conf`.
+
+### IPv6
+
+The router is behind a Freebox that **delegates a single static `/64` prefix** (`2a01:e0a:97f:5432::/64`) to it. Configure this prefix on the Freebox side via *Paramètres de la Freebox → Configuration IPv6 → Délégation de préfixe*, pinned to the router's WAN MAC. The router-side IPv6 model is fully static — matches the project's static-config philosophy:
+
+| Interface | IPv6 |
+|---|---|
+| `wan0` | SLAAC (Freebox RA) — `IPv6AcceptRA=yes`, `UseDNS=false` so resolved keeps its DoT setup |
+| `br-lan` | Static `2a01:e0a:97f:5432::1/64`, RA emission via `IPv6SendRA=yes` + `[IPv6Prefix]`, advertises itself as RDNSS |
+| Forwarding | `IPv4Forwarding=yes` + `IPv6Forwarding=yes` per-interface on both wan0 and br-lan |
+| NAT | IPv4 only (`IPMasquerade=ipv4` on wan0). IPv6 is end-to-end — LAN clients carry public GUAs from the delegated /64. |
+
+systemd-resolved listens for DNS on both `10.0.0.1` and `2a01:e0a:97f:5432::1` (see `resolved-router.conf`).
+
+### Firewall (nftables)
+
+Stateful inet-family firewall shipped by the `futro-firewall` recipe (`recipes-extended/firewall/`). The systemd unit runs `Before=network-pre.target`, so the policy is in effect before any interface comes up.
+
+**Trust model:** LAN is trusted, WAN is hostile.
+- `input`: drop default; accept lo, ICMP, ICMPv6, anything from `br-lan`, and DHCPv4 client replies on `wan0`.
+- `forward`: drop default; accept established/related (return path for both v4 and v6) and `br-lan → wan0` (LAN egress).
+- `output`: accept default.
+
+### Networking Pitfalls
+
+**`IPv6AcceptRA=` defaults flip with forwarding:** systemd-networkd defaults `IPv6AcceptRA=` to `no` whenever IPv6 forwarding is enabled on an interface — the assumption is that routers are usually not also CPE clients. Our `wan0` is both: it forwards LAN traffic out and learns its default IPv6 route from the Freebox's RA. So `IPv6AcceptRA=yes` must be set **explicitly** on `wan0`; relying on the default silently kills outbound IPv6.
+
+**Don't `flush ruleset` in the firewall config:** systemd-networkd installs its own `ip nat` table for `IPMasquerade=ipv4`. A blanket `flush ruleset` in `nftables.conf` would wipe NAT, breaking IPv4 internet access until networkd is restarted. Use the atomic `table inet filter` / `delete table inet filter` idiom to replace only our own table, so the firewall can be reloaded at runtime without touching networkd's NAT.
+
+**Allow ICMPv6 unconditionally on input:** ICMPv6 carries Neighbor Discovery, Router Advertisements, and PMTUD — drop it and IPv6 reachability silently dies (no neighbor cache, no PMTUD, RA from Freebox doesn't update default route). A single `ip6 nexthdr icmpv6 accept` covers it.
+
+**`meta-networking` must be in LAYERDEPENDS:** the `futro-firewall` recipe RDEPENDS on `nftables` which comes from `meta-openembedded/meta-networking`. The collection name is `networking-layer` (see its `layer.conf`). Without the LAYERDEPENDS entry, bitbake parses fine but the layer-compat check warns; with it, the dependency is explicit.
 
 ## Barebox Bootloader
 

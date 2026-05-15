@@ -1,4 +1,4 @@
-IMAGE_INSTALL:append = " rauc sudo systemd-networkd futro-network-conf futro-persistent-state openssh-sshd kernel-modules kbd kbd-consolefonts kbd-keymaps futro-console-conf linux-firmware-amdgpu fbset"
+IMAGE_INSTALL:append = " rauc sudo systemd-networkd futro-network-conf futro-firewall futro-persistent-state openssh-sshd kernel-modules kbd kbd-consolefonts kbd-keymaps futro-console-conf linux-firmware-amdgpu fbset"
 
 # Show boot messages instead of splash screen
 SPLASH = ""
@@ -47,7 +47,11 @@ def read_secret(d, name):
     with open(path) as f:
         return f.read().strip()
 
-PPLR_PASSWD_HASH := "${@read_secret(d, 'pplr.hash')}"
+# Escape $ so it survives the double-quoted shell assignment
+# `user_group_settings="${EXTRA_USERS_PARAMS}"` inside extrausers.bbclass —
+# otherwise $6, $rounds, $<salt>, $<hash> are expanded as empty shell vars
+# before useradd ever sees the hash.
+PPLR_PASSWD_HASH := "${@read_secret(d, 'pplr.hash').replace('$', r'\$')}"
 
 EXTRA_USERS_PARAMS = "useradd -m -s /bin/sh -G sudo,adm -p '${PPLR_PASSWD_HASH}' pplr;"
 

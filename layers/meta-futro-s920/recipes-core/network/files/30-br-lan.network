@@ -3,7 +3,13 @@ Name=br-lan
 
 [Network]
 Address=10.0.0.1/24
-IPForward=ipv4
+# Static /64 delegated to us by the Freebox (configured statically on the
+# Freebox side as well — see CLAUDE.md "IPv6").
+Address=2a01:e0a:97f:5432::1/64
+IPv4Forwarding=yes
+IPv6Forwarding=yes
+IPv6AcceptRA=no
+IPv6SendRA=yes
 DHCPServer=yes
 
 [DHCPServer]
@@ -11,3 +17,12 @@ PoolOffset=100
 PoolSize=155
 DNS=10.0.0.1
 DefaultLeaseTimeSec=3600
+
+[IPv6SendRA]
+# Tell LAN clients to use the router's GUA for DNS (resolved listens on it,
+# see resolved-router.conf). M/O flags stay unset → pure SLAAC.
+EmitDNS=yes
+DNS=2a01:e0a:97f:5432::1
+
+[IPv6Prefix]
+Prefix=2a01:e0a:97f:5432::/64

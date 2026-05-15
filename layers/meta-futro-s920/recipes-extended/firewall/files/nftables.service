@@ -1,0 +1,21 @@
+[Unit]
+Description=Netfilter ruleset for home-router
+Documentation=man:nft(8)
+# Bring the firewall up before any networking, so wan0 is never
+# reachable from the outside without the policy in place.
+Before=network-pre.target
+Wants=network-pre.target
+After=systemd-modules-load.service
+ConditionPathExists=/etc/nftables.conf
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/nft -f /etc/nftables.conf
+ExecReload=/usr/sbin/nft -f /etc/nftables.conf
+# On stop, drop only our table — leave systemd-networkd's `ip nat` masquerade
+# table intact so NAT keeps working if the firewall unit is restarted.
+ExecStop=/usr/sbin/nft delete table inet filter
+
+[Install]
+WantedBy=multi-user.target
