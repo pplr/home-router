@@ -6,6 +6,12 @@ Address=10.0.0.1/24
 # Static /64 delegated to us by the Freebox (configured statically on the
 # Freebox side as well — see CLAUDE.md "IPv6").
 Address=2a01:e0a:97f:5432::1/64
+# IPMasquerade=ipv4 belongs on the LAN side, not on wan0: systemd-networkd
+# adds the interface's *own* /prefix to the `masq_saddr` set in
+# io.systemd.nat, and the postrouting rule SNATs packets matching that set.
+# We want 10.0.0.0/24 in the set, not wan0's Freebox-DHCP subnet. See
+# CLAUDE.md "Networking Pitfalls".
+IPMasquerade=ipv4
 IPv4Forwarding=yes
 IPv6Forwarding=yes
 IPv6AcceptRA=no

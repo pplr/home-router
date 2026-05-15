@@ -167,7 +167,7 @@ The router is behind a Freebox that **delegates a single static `/64` prefix** (
 | `wan0` | SLAAC (Freebox RA) — `IPv6AcceptRA=yes`, `UseDNS=false` so resolved keeps its DoT setup |
 | `br-lan` | Static `2a01:e0a:97f:5432::1/64`, RA emission via `IPv6SendRA=yes` + `[IPv6Prefix]`, advertises itself as RDNSS |
 | Forwarding | `IPv4Forwarding=yes` + `IPv6Forwarding=yes` per-interface on both wan0 and br-lan |
-| NAT | IPv4 only (`IPMasquerade=ipv4` on wan0). IPv6 is end-to-end — LAN clients carry public GUAs from the delegated /64. |
+| NAT | IPv4 only (`IPMasquerade=ipv4` on **br-lan** — see Networking Pitfalls for why it's on the LAN side, not wan0). IPv6 is end-to-end — LAN clients carry public GUAs from the delegated /64. |
 
 systemd-resolved listens for DNS on both `10.0.0.1` and `2a01:e0a:97f:5432::1` (see `resolved-router.conf`).
 
@@ -189,6 +189,10 @@ Stateful inet-family firewall shipped by the `futro-firewall` recipe (`recipes-e
 **Allow ICMPv6 unconditionally on input:** ICMPv6 carries Neighbor Discovery, Router Advertisements, and PMTUD — drop it and IPv6 reachability silently dies (no neighbor cache, no PMTUD, RA from Freebox doesn't update default route). A single `ip6 nexthdr icmpv6 accept` covers it.
 
 **`meta-networking` must be in LAYERDEPENDS:** the `futro-firewall` recipe RDEPENDS on `nftables` which comes from `meta-openembedded/meta-networking`. The collection name is `networking-layer` (see its `layer.conf`). Without the LAYERDEPENDS entry, bitbake parses fine but the layer-compat check warns; with it, the dependency is explicit.
+
+**`IPMasquerade=ipv4` masquerades the interface's *own* subnet, not its egress:** unlike the iptables idiom `-t nat -A POSTROUTING -o wan0 -j MASQUERADE`, systemd-networkd's `IPMasquerade=ipv4` adds *this interface's* network prefix (the address masked by `prefixlen`) into the `masq_saddr` set inside its private `io.systemd.nat` table — see `src/network/networkd-address.c:668-688` in the systemd source. The postrouting rule (`ip saddr @masq_saddr masquerade`) then SNATs any packet whose **source** matches the set. So for home-router NAT (LAN→WAN), the directive belongs on **`br-lan`** (the LAN subnet we want masqueraded), not on `wan0`. If put on `wan0`, the set ends up containing the Freebox-side DHCP subnet (e.g. `192.168.0.0/24`) and LAN clients (`10.0.0.0/24`) never match the rule — packets leave `wan0` with their original private source and the internet drops them. Symptom: laptop on LAN gets a lease, can ping the router, can't reach `8.8.8.8`; on the router, `nft list table ip io.systemd.nat` shows `masq_saddr` containing the WAN's subnet instead of the LAN's.
+
+**IPv6 forwarding requires the *global* sysctl, IPv4 doesn't:** the two address families are not symmetric in the kernel. `ip_route_input_slow()` (`net/ipv4/route.c`) checks `IN_DEV_FORWARD(in_dev)` — i.e. *per-interface only* — so per-interface `IPv4Forwarding=yes` on `wan0` + `br-lan` is sufficient for IPv4. But `ip6_forward()` (`net/ipv6/ip6_output.c:513`) checks `net->ipv6.devconf_all->forwarding` *first* and drops the packet immediately if it's 0 — per-interface flags are not consulted at all when the global is 0. Setting `IPv6Forwarding=yes` in a `.network` file only writes `/proc/sys/net/ipv6/conf/<iface>/forwarding`; the global is written by `manager_set_ip_forwarding()` (`src/network/networkd-sysctl.c:200`), which is only invoked when the global setting is present in **`networkd.conf`**'s `[Network] IPv6Forwarding=`. We ship that as a `networkd.conf.d/router.conf` drop-in via `futro-network-conf`. Symptom if missing: LAN clients get GUAs and a default route, but every forwarded IPv6 packet is silently dropped by the router; the router itself can still `ping -6` the internet because locally-generated packets bypass `ip6_forward()`.
 
 ## Barebox Bootloader
 

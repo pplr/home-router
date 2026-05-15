@@ -11,6 +11,7 @@ SRC_URI = " \
     file://20-lan1.network \
     file://30-br-lan.netdev \
     file://30-br-lan.network \
+    file://networkd-router.conf \
     file://resolved-router.conf \
 "
 
@@ -26,11 +27,15 @@ do_install() {
         install -m 0644 ${UNPACKDIR}/$f ${D}${sysconfdir}/systemd/network/$f
     done
 
+    install -d ${D}${sysconfdir}/systemd/networkd.conf.d
+    install -m 0644 ${UNPACKDIR}/networkd-router.conf ${D}${sysconfdir}/systemd/networkd.conf.d/router.conf
+
     install -d ${D}${sysconfdir}/systemd/resolved.conf.d
     install -m 0644 ${UNPACKDIR}/resolved-router.conf ${D}${sysconfdir}/systemd/resolved.conf.d/router.conf
 }
 
 FILES:${PN} = " \
     ${sysconfdir}/systemd/network/ \
+    ${sysconfdir}/systemd/networkd.conf.d/ \
     ${sysconfdir}/systemd/resolved.conf.d/ \
 "

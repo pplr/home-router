@@ -3,7 +3,6 @@ Name=wan0
 
 [Network]
 DHCP=ipv4
-IPMasquerade=ipv4
 IPv4Forwarding=yes
 IPv6Forwarding=yes
 # Accept the Freebox's RA on WAN so we learn a GUA and default IPv6 route.
