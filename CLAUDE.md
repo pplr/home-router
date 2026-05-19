@@ -160,6 +160,17 @@ Source dirs on `/data` are created on first mount by `futro-data-prep.service` (
 
 systemd-networkd-managed three-NIC setup: `wan0` (PCI `04:00.0`) faces the Freebox, `lan0` (`03:00.0`) and `lan1` (`05:00.0`) are bridged into `br-lan` (10.0.0.1/24). DHCPv4 server runs on `br-lan`; DNS is systemd-resolved with DoT to Cloudflare. Config files live in `recipes-core/network/files/` and are installed by `futro-network-conf`.
 
+### Freebox IPTV (VLAN 100)
+
+A Freebox Revolution tags **player↔server traffic with VLAN 100** on the same Ethernet wire it uses for WAN data. The router acts as a transparent L2 switch for that VLAN between the WAN port and both LAN ports, so a Freebox Player plugged into either `lan0` or `lan1` reaches the Freebox Server upstream.
+
+- `wan0.100`, `lan0.100`, `lan1.100` — VLAN sub-interfaces (`Kind=vlan`, `Id=100`), declared via `VLAN=` on each parent's `.network`.
+- `br-iptv` — dedicated **L2-only** bridge (`LinkLocalAddressing=no`, `IPv6AcceptRA=no`) with the three sub-interfaces as members. No IP stack on the router for this VLAN.
+
+The kernel demuxes tagged frames at the parent NIC: tag 100 is stolen into the `.100` sub-interface (and from there into `br-iptv`); untagged frames stay on the parent and continue through `br-lan`. So `lan0` / `lan1` carry untagged LAN data **and** tagged IPTV on the same wire — no dedicated port required.
+
+Why a separate `br-iptv` instead of enabling bridge-VLAN-filtering on `br-lan`: making `wan0` a trunk member of `br-lan` would force migrating its DHCP/RA L3 stack onto a VLAN sub-interface and entangle the WAN with the LAN bridge. Keeping IPTV in its own bridge keeps the two concerns orthogonal and the WAN config untouched.
+
 ### IPv6
 
 The router is behind a Freebox that **delegates a single static `/64` prefix** (`2a01:e0a:97f:5432::/64`) to it. Configure this prefix on the Freebox side via *Paramètres de la Freebox → Configuration IPv6 → Délégation de préfixe*, pinned to the router's WAN MAC. The router-side IPv6 model is fully static — matches the project's static-config philosophy:

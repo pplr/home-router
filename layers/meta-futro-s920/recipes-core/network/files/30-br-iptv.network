@@ -1,0 +1,12 @@
+[Match]
+Name=br-iptv
+
+[Network]
+# L2-only bridge — transparently ferries Freebox IPTV VLAN 100 frames between
+# wan0.100 (toward Freebox Server) and lan0.100 / lan1.100 (toward Players).
+# No IP stack on the router for this VLAN.
+LinkLocalAddressing=no
+IPv6AcceptRA=no
+LLDP=no
+EmitLLDP=no
+ConfigureWithoutCarrier=yes

@@ -8,6 +8,9 @@ IPv6Forwarding=yes
 # Accept the Freebox's RA on WAN so we learn a GUA and default IPv6 route.
 # IPv6AcceptRA defaults to no when IPv6Forwarding=yes — enable it explicitly.
 IPv6AcceptRA=yes
+# Freebox IPTV trunk: tag 100 is demuxed off wan0 into the wan0.100
+# sub-interface, which is bridged with lan0.100 / lan1.100 in br-iptv.
+VLAN=wan0.100
 
 [DHCPv4]
 UseDNS=false
