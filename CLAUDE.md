@@ -135,12 +135,15 @@ To rotate any secret: regenerate the file, rebuild, deploy via RAUC. Hostname (`
 
 ### Persistent operational state on /data
 
-Two pieces of operational state are bind-mounted from `/data` so they survive A/B updates. They are *not* configuration — they're state generated at runtime that we want to keep across slot swaps.
+Operational state is bind-mounted from `/data` so it survives A/B updates. They are *not* configuration — they're state generated at runtime that we want to keep across slot swaps.
 
 | Bind mount | Purpose |
 |---|---|
 | `/data/var/log/journal` → `/var/log/journal` | Persistent systemd journal (`Storage=persistent` via journald drop-in) |
 | `/data/var/lib/systemd/network` → `/var/lib/systemd/network` | DHCP server leases for connected LAN clients |
+| `/data/var/cache/netdata` → `/var/cache/netdata` | netdata runtime cache |
+| `/data/var/lib/netdata` → `/var/lib/netdata` | netdata persistent metrics database |
+| `/data/home/pplr` → `/home/pplr` | `pplr` user's home (shell history, dotfiles); seeded from the rootfs skeleton on first boot |
 
 Source dirs on `/data` are created on first mount by `futro-data-prep.service` (oneshot, ordered between `data.mount` and the bind mounts via `x-systemd.requires=` in fstab). Provided by the `futro-persistent-state` recipe in `recipes-core/futro-persistent-state/`.
 

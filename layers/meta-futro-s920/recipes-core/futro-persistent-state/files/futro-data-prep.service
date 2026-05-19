@@ -3,15 +3,17 @@ Description=Create /data subdirs for persistent state bind mounts
 DefaultDependencies=no
 RequiresMountsFor=/data
 After=data.mount
-Before=var-log-journal.mount var-lib-systemd-network.mount var-cache-netdata.mount var-lib-netdata.mount systemd-journald.service
+Before=var-log-journal.mount var-lib-systemd-network.mount var-cache-netdata.mount var-lib-netdata.mount home-pplr.mount systemd-journald.service
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/bin/mkdir -p /data/var/log/journal /data/var/lib/systemd/network /data/var/cache/netdata /data/var/lib/netdata
+ExecStart=/bin/mkdir -p /data/var/log/journal /data/var/lib/systemd/network /data/var/cache/netdata /data/var/lib/netdata /data/home
 ExecStart=/bin/chmod 2755 /data/var/log/journal
 ExecStart=/bin/chgrp systemd-journal /data/var/log/journal
 ExecStart=/bin/chown netdata:netdata /data/var/cache/netdata /data/var/lib/netdata
+# Seed pplr's home from the rootfs skeleton on first boot; preserved across A/B swaps.
+ExecStart=/bin/sh -c '[ -e /data/home/pplr ] || cp -a /home/pplr /data/home/'
 
 [Install]
 WantedBy=local-fs.target

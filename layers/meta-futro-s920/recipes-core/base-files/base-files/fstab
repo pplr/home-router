@@ -15,3 +15,4 @@ PARTUUID=f7200005-a001-4000-8001-000000000005  /data     ext4  defaults,noatime 
 /data/var/lib/systemd/network   /var/lib/systemd/network   none  bind,x-systemd.requires=futro-data-prep.service,nofail  0  0
 /data/var/cache/netdata         /var/cache/netdata         none  bind,x-systemd.requires=futro-data-prep.service,nofail  0  0
 /data/var/lib/netdata           /var/lib/netdata           none  bind,x-systemd.requires=futro-data-prep.service,nofail  0  0
+/data/home/pplr                 /home/pplr                 none  bind,x-systemd.requires=futro-data-prep.service,nofail  0  0
