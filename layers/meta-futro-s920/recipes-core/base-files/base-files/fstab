@@ -13,3 +13,5 @@ PARTUUID=f7200005-a001-4000-8001-000000000005  /data     ext4  defaults,noatime 
 # created (with correct ownership) before the bind mount runs.
 /data/var/log/journal           /var/log/journal           none  bind,x-systemd.requires=futro-data-prep.service,nofail  0  0
 /data/var/lib/systemd/network   /var/lib/systemd/network   none  bind,x-systemd.requires=futro-data-prep.service,nofail  0  0
+/data/var/cache/netdata         /var/cache/netdata         none  bind,x-systemd.requires=futro-data-prep.service,nofail  0  0
+/data/var/lib/netdata           /var/lib/netdata           none  bind,x-systemd.requires=futro-data-prep.service,nofail  0  0
