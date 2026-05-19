@@ -9,6 +9,8 @@ SRC_URI += " \
     file://ssh_host_ed25519_key.pub \
     file://ssh_host_rsa_key \
     file://ssh_host_rsa_key.pub \
+    file://ssh_host_ecdsa_key \
+    file://ssh_host_ecdsa_key.pub \
 "
 
 do_install:append() {
@@ -20,6 +22,8 @@ do_install:append() {
     install -m 0644 ${UNPACKDIR}/ssh_host_ed25519_key.pub ${D}${sysconfdir}/ssh/ssh_host_ed25519_key.pub
     install -m 0600 ${UNPACKDIR}/ssh_host_rsa_key         ${D}${sysconfdir}/ssh/ssh_host_rsa_key
     install -m 0644 ${UNPACKDIR}/ssh_host_rsa_key.pub     ${D}${sysconfdir}/ssh/ssh_host_rsa_key.pub
+    install -m 0600 ${UNPACKDIR}/ssh_host_ecdsa_key       ${D}${sysconfdir}/ssh/ssh_host_ecdsa_key
+    install -m 0644 ${UNPACKDIR}/ssh_host_ecdsa_key.pub   ${D}${sysconfdir}/ssh/ssh_host_ecdsa_key.pub
 }
 
 # OE-core's openssh recipe defines FILES:${PN}-sshd as an *explicit* list (see
@@ -35,5 +39,7 @@ FILES:${PN}-sshd += " \
     ${sysconfdir}/ssh/ssh_host_ed25519_key.pub \
     ${sysconfdir}/ssh/ssh_host_rsa_key \
     ${sysconfdir}/ssh/ssh_host_rsa_key.pub \
+    ${sysconfdir}/ssh/ssh_host_ecdsa_key \
+    ${sysconfdir}/ssh/ssh_host_ecdsa_key.pub \
     ${sysconfdir}/ssh/sshd_config.d/lan-only.conf \
 "

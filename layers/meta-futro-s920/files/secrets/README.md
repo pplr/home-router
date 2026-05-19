@@ -9,6 +9,7 @@ at recipe parse / `do_install` time to bake static identity into the image:
 | `machine-id` | `base-files_%.bbappend` | Static `/etc/machine-id` (32 hex chars) |
 | `ssh/ssh_host_ed25519_key{,.pub}` | `openssh_%.bbappend` | Baked-in ed25519 host key |
 | `ssh/ssh_host_rsa_key{,.pub}` | `openssh_%.bbappend` | Baked-in RSA host key |
+| `ssh/ssh_host_ecdsa_key{,.pub}` | `openssh_%.bbappend` | Baked-in ECDSA host key |
 
 If any of these is missing, the build fails fast with a clear `bb.fatal` message.
 
@@ -29,10 +30,14 @@ mkpasswd -m sha512crypt -R 500000 > "$SECRETS/pplr.hash"
 #    avoids portability issues between GNU tr and uutils `tr`.
 python3 -c "import uuid; print(uuid.uuid4().hex)" > "$SECRETS/machine-id"
 
-# 3. SSH host keys (ed25519 + rsa). Comment is informational only.
+# 3. SSH host keys (ed25519 + rsa + ecdsa). Comment is informational only.
+#    All three are baked so sshdgenkeys.service stays a no-op — otherwise the
+#    un-baked key types are regenerated on every fresh RAUC slot and the
+#    device's SSH fingerprint flips when the client happens to negotiate one.
 mkdir -p "$SECRETS/ssh"
 ssh-keygen -t ed25519 -N '' -f "$SECRETS/ssh/ssh_host_ed25519_key" -C home-router
 ssh-keygen -t rsa -b 4096 -N '' -f "$SECRETS/ssh/ssh_host_rsa_key" -C home-router
+ssh-keygen -t ecdsa -b 256 -N '' -f "$SECRETS/ssh/ssh_host_ecdsa_key" -C home-router
 ```
 
 ## Rotating
