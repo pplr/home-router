@@ -1,0 +1,31 @@
+[Match]
+Name=br-iot
+
+[Network]
+Address=10.0.30.1/24
+# Second /64 delegated to us by the Freebox, alongside the LAN /64 (configured
+# statically on the Freebox side as a second Délégation de préfixe row with
+# the same Next Hop as the LAN delegation — see CLAUDE.md "IPv6").
+Address=2a01:e0a:97f:5433::1/64
+# IPMasquerade=ipv4 belongs on the LAN side, not on wan0 — see CLAUDE.md
+# "Networking Pitfalls". This adds 10.0.30.0/24 to io.systemd.nat's masq_saddr
+# set so IoT egress gets SNATted at wan0.
+IPMasquerade=ipv4
+IPv4Forwarding=yes
+IPv6Forwarding=yes
+IPv6AcceptRA=no
+IPv6SendRA=yes
+DHCPServer=yes
+
+[DHCPServer]
+PoolOffset=100
+PoolSize=155
+DNS=10.0.30.1
+DefaultLeaseTimeSec=3600
+
+[IPv6SendRA]
+EmitDNS=yes
+DNS=2a01:e0a:97f:5433::1
+
+[IPv6Prefix]
+Prefix=2a01:e0a:97f:5433::/64

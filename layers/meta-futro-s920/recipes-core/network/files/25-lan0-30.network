@@ -1,0 +1,9 @@
+[Match]
+Name=lan0.30
+
+[Network]
+Bridge=br-iot
+LinkLocalAddressing=no
+IPv6AcceptRA=no
+LLDP=no
+EmitLLDP=no

@@ -15,10 +15,16 @@ SRC_URI = " \
     file://25-lan0-100.network \
     file://25-lan1-100.netdev \
     file://25-lan1-100.network \
+    file://25-lan0-30.netdev \
+    file://25-lan0-30.network \
+    file://25-lan1-30.netdev \
+    file://25-lan1-30.network \
     file://30-br-lan.netdev \
     file://30-br-lan.network \
     file://30-br-iptv.netdev \
     file://30-br-iptv.network \
+    file://30-br-iot.netdev \
+    file://30-br-iot.network \
     file://networkd-router.conf \
     file://resolved-router.conf \
 "
@@ -34,8 +40,11 @@ do_install() {
              15-wan0-100.netdev 15-wan0-100.network \
              25-lan0-100.netdev 25-lan0-100.network \
              25-lan1-100.netdev 25-lan1-100.network \
+             25-lan0-30.netdev 25-lan0-30.network \
+             25-lan1-30.netdev 25-lan1-30.network \
              30-br-lan.netdev 30-br-lan.network \
-             30-br-iptv.netdev 30-br-iptv.network; do
+             30-br-iptv.netdev 30-br-iptv.network \
+             30-br-iot.netdev 30-br-iot.network; do
         install -m 0644 ${UNPACKDIR}/$f ${D}${sysconfdir}/systemd/network/$f
     done
 

@@ -1,0 +1,6 @@
+[NetDev]
+Name=lan0.30
+Kind=vlan
+
+[VLAN]
+Id=30

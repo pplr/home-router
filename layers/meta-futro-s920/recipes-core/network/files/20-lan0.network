@@ -6,3 +6,5 @@ Bridge=br-lan
 # Freebox IPTV: tag 100 is demuxed into lan0.100 (bridged into br-iptv);
 # untagged frames continue to flow through br-lan as before.
 VLAN=lan0.100
+# Untrusted IoT VLAN: tag 30 is demuxed into lan0.30 (bridged into br-iot).
+VLAN=lan0.30

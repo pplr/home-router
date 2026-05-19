@@ -173,26 +173,39 @@ The kernel demuxes tagged frames at the parent NIC: tag 100 is stolen into the `
 
 Why a separate `br-iptv` instead of enabling bridge-VLAN-filtering on `br-lan`: making `wan0` a trunk member of `br-lan` would force migrating its DHCP/RA L3 stack onto a VLAN sub-interface and entangle the WAN with the LAN bridge. Keeping IPTV in its own bridge keeps the two concerns orthogonal and the WAN config untouched.
 
+### IoT VLAN (VLAN 30)
+
+A third, untrusted broadcast domain for IoT devices on VLAN 30. Unlike IPTV (L2 ferry between WAN and LAN), IoT is an **L3-routed** downstream-only VLAN — it never touches wan0 as L2; egress is via routing/NAT.
+
+- `lan0.30`, `lan1.30` — VLAN sub-interfaces, declared via `VLAN=` on each parent's `.network`. Same kernel-level demux as IPTV: tag 30 is stolen into the `.30` sub-interface at parent ingress, untagged frames still flow into `br-lan`. So lan0/lan1 carry untagged LAN data **and** tagged IPTV (VLAN 100) **and** tagged IoT (VLAN 30) on the same wire.
+- `br-iot` — full L3 bridge, mirror of br-lan: `10.0.30.1/24` + `2a01:e0a:97f:5433::1/64`, `IPMasquerade=ipv4` (NAT44 to WAN), `IPv6SendRA=yes` + `[IPv6Prefix]` (native v6 to WAN), `DHCPServer=yes` (pool `10.0.30.100`–`10.0.30.254`), advertises itself as RDNSS.
+- **No wan0.30 sub-interface and no trunk to wan0** — IoT traffic egresses via routing and SNAT on wan0, not via L2 bridging like IPTV.
+
+**Trust model (firewall):** asymmetric. LAN can freely initiate to IoT (so a LAN laptop can reach a smart-home hub); IoT cannot initiate to LAN — implicitly denied by the `forward` chain's default-drop, with conntrack `established,related` carrying return traffic for LAN-initiated sessions. IoT → router-local services is narrowed to **DHCPv4 (udp/67) + DNS (udp/53 + tcp/53)** only; SSH, netdata, and any future admin port fall through to the input chain's default-drop. IoT → WAN is allowed for both IPv4 (NATted) and IPv6 (native, via the second delegated /64).
+
+**Hardware prerequisite:** downstream must be VLAN-aware — a managed switch tagging IoT-port frames with VLAN 30, or a VLAN-capable AP with an IoT SSID bound to VLAN 30. A dumb switch delivers IoT frames untagged on lan0/lan1, defeating the isolation.
+
 ### IPv6
 
-The router is behind a Freebox that **delegates a single static `/64` prefix** (`2a01:e0a:97f:5432::/64`) to it. Configure this prefix on the Freebox side via *Paramètres de la Freebox → Configuration IPv6 → Délégation de préfixe*, pinned to the router's WAN MAC. The router-side IPv6 model is fully static — matches the project's static-config philosophy:
+The router is behind a Freebox that **statically delegates two `/64` prefixes** to it: `2a01:e0a:97f:5432::/64` for the trusted LAN and `2a01:e0a:97f:5433::/64` for the untrusted IoT VLAN. Configure on the Freebox side via *Paramètres de la Freebox → Configuration IPv6 → Délégation de préfixe*. Each row takes a **Préfixe IPv6 délégué** (the `/64`) and a **Prochaine route (Next Hop)** — the IPv6 address of the device receiving the delegation, which is the router's `wan0` SLAAC GUA (learned from the Freebox RA; check with `ip -6 addr show wan0 scope global`). Both delegation rows must use the same Next Hop. The router-side IPv6 model is fully static — matches the project's static-config philosophy:
 
 | Interface | IPv6 |
 |---|---|
 | `wan0` | SLAAC (Freebox RA) — `IPv6AcceptRA=yes`, `UseDNS=false` so resolved keeps its DoT setup |
 | `br-lan` | Static `2a01:e0a:97f:5432::1/64`, RA emission via `IPv6SendRA=yes` + `[IPv6Prefix]`, advertises itself as RDNSS |
-| Forwarding | `IPv4Forwarding=yes` + `IPv6Forwarding=yes` per-interface on both wan0 and br-lan |
-| NAT | IPv4 only (`IPMasquerade=ipv4` on **br-lan** — see Networking Pitfalls for why it's on the LAN side, not wan0). IPv6 is end-to-end — LAN clients carry public GUAs from the delegated /64. |
+| `br-iot` | Static `2a01:e0a:97f:5433::1/64`, same RA emission pattern as br-lan, advertises itself as RDNSS |
+| Forwarding | `IPv4Forwarding=yes` + `IPv6Forwarding=yes` per-interface on wan0, br-lan, and br-iot |
+| NAT | IPv4 only (`IPMasquerade=ipv4` on **br-lan** and **br-iot** — see Networking Pitfalls for why it's on the LAN side, not wan0). IPv6 is end-to-end — clients carry public GUAs from their respective delegated /64. |
 
-systemd-resolved listens for DNS on both `10.0.0.1` and `2a01:e0a:97f:5432::1` (see `resolved-router.conf`).
+systemd-resolved listens for DNS on `10.0.0.1`, `2a01:e0a:97f:5432::1`, `10.0.30.1`, and `2a01:e0a:97f:5433::1` (see `resolved-router.conf`).
 
 ### Firewall (nftables)
 
 Stateful inet-family firewall shipped by the `futro-firewall` recipe (`recipes-extended/firewall/`). The systemd unit runs `Before=network-pre.target`, so the policy is in effect before any interface comes up.
 
-**Trust model:** LAN is trusted, WAN is hostile.
-- `input`: drop default; accept lo, ICMP, ICMPv6, anything from `br-lan`, and DHCPv4 client replies on `wan0`.
-- `forward`: drop default; accept established/related (return path for both v4 and v6) and `br-lan → wan0` (LAN egress).
+**Trust model:** LAN is trusted, WAN is hostile, IoT is untrusted.
+- `input`: drop default; accept lo, ICMP, ICMPv6, anything from `br-lan`, DHCPv4/DNS only from `br-iot`, and DHCPv4 client replies on `wan0`.
+- `forward`: drop default; accept established/related (return path for both v4 and v6), `br-lan → wan0` (LAN egress), `br-lan → br-iot` (LAN-initiated to IoT — asymmetric trust), and `br-iot → wan0` (IoT egress). `br-iot → br-lan` is implicitly dropped.
 - `output`: accept default.
 
 ### Networking Pitfalls
@@ -206,6 +219,8 @@ Stateful inet-family firewall shipped by the `futro-firewall` recipe (`recipes-e
 **`meta-networking` must be in LAYERDEPENDS:** the `futro-firewall` recipe RDEPENDS on `nftables` which comes from `meta-openembedded/meta-networking`. The collection name is `networking-layer` (see its `layer.conf`). Without the LAYERDEPENDS entry, bitbake parses fine but the layer-compat check warns; with it, the dependency is explicit.
 
 **`IPMasquerade=ipv4` masquerades the interface's *own* subnet, not its egress:** unlike the iptables idiom `-t nat -A POSTROUTING -o wan0 -j MASQUERADE`, systemd-networkd's `IPMasquerade=ipv4` adds *this interface's* network prefix (the address masked by `prefixlen`) into the `masq_saddr` set inside its private `io.systemd.nat` table — see `src/network/networkd-address.c:668-688` in the systemd source. The postrouting rule (`ip saddr @masq_saddr masquerade`) then SNATs any packet whose **source** matches the set. So for home-router NAT (LAN→WAN), the directive belongs on **`br-lan`** (the LAN subnet we want masqueraded), not on `wan0`. If put on `wan0`, the set ends up containing the Freebox-side DHCP subnet (e.g. `192.168.0.0/24`) and LAN clients (`10.0.0.0/24`) never match the rule — packets leave `wan0` with their original private source and the internet drops them. Symptom: laptop on LAN gets a lease, can ping the router, can't reach `8.8.8.8`; on the router, `nft list table ip io.systemd.nat` shows `masq_saddr` containing the WAN's subnet instead of the LAN's.
+
+**systemd-networkd's DHCPv4 server receive path traverses netfilter; the send path does not:** `sd-dhcp-server` opens a regular UDP socket bound to the interface for inbound DHCPDISCOVER/REQUEST (`src/libsystemd-network/sd-dhcp-server.c:1325`) but sends replies via an `AF_PACKET` raw socket that bypasses netfilter. Consequence: any **untrusted** bridge with the DHCP server enabled needs an explicit `iifname "br-xxx" udp dport 67 accept` rule on `input`, or clients never get leases (silent drop, no log line beyond the chain's drop counter). `br-lan` doesn't need it because the catch-all `iifname "br-lan" accept` already covers DHCP; `br-iot` does because the trust model there is default-drop + narrow allow. No `output` rule is ever needed for DHCP replies.
 
 **IPv6 forwarding requires the *global* sysctl, IPv4 doesn't:** the two address families are not symmetric in the kernel. `ip_route_input_slow()` (`net/ipv4/route.c`) checks `IN_DEV_FORWARD(in_dev)` — i.e. *per-interface only* — so per-interface `IPv4Forwarding=yes` on `wan0` + `br-lan` is sufficient for IPv4. But `ip6_forward()` (`net/ipv6/ip6_output.c:513`) checks `net->ipv6.devconf_all->forwarding` *first* and drops the packet immediately if it's 0 — per-interface flags are not consulted at all when the global is 0. Setting `IPv6Forwarding=yes` in a `.network` file only writes `/proc/sys/net/ipv6/conf/<iface>/forwarding`; the global is written by `manager_set_ip_forwarding()` (`src/network/networkd-sysctl.c:200`), which is only invoked when the global setting is present in **`networkd.conf`**'s `[Network] IPv6Forwarding=`. We ship that as a `networkd.conf.d/router.conf` drop-in via `futro-network-conf`. Symptom if missing: LAN clients get GUAs and a default route, but every forwarded IPv6 packet is silently dropped by the router; the router itself can still `ping -6` the internet because locally-generated packets bypass `ip6_forward()`.
 
