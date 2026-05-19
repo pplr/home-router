@@ -29,6 +29,7 @@ IMAGE_INSTALL:append = " \
     which \
     unzip \
     cpio \
+    tcpdump \
 "
 
 IMAGE_FSTYPES:append = " ext4"
