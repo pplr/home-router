@@ -11,3 +11,10 @@ build/*.log
 # README.md is the only file in this directory that's tracked.
 layers/meta-futro-s920/files/secrets/*
 !layers/meta-futro-s920/files/secrets/README.md
+
+# AP build artifacts and out-of-tree AP secrets (same convention).
+aps/downloads/
+aps/build/
+aps/secrets/*
+!aps/secrets/README.md
+aps/**/__pycache__/

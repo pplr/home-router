@@ -1,0 +1,12 @@
+# The router (10.0.0.1) is the sole DHCP+DNS server on the LAN and IoT
+# VLANs. The AP must not answer DHCP for either bridge — dnsmasq stays
+# off here (and the dnsmasq package is removed via packages.list).
+
+config dnsmasq
+	option disabled '1'
+
+config dhcp 'lan'
+	option ignore '1'
+
+config dhcp 'wan'
+	option ignore '1'

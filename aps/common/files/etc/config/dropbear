@@ -1,0 +1,6 @@
+config dropbear
+	option PasswordAuth 'on'
+	option RootPasswordAuth 'on'
+	option Port '22'
+	# Keep verbose key auth on; baked authorized_keys + host keys mean SSH
+	# stays usable from the LAN without any first-boot interactive step.
