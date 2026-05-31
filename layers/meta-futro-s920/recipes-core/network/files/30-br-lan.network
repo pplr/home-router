@@ -23,12 +23,22 @@ PoolOffset=100
 PoolSize=155
 DNS=10.0.0.1
 DefaultLeaseTimeSec=3600
+# NOTE: systemd 257 has no [DHCPServer] EmitDomain/Domain directive
+# (added in v259) — there's no way to push a DHCPv4 search domain from
+# networkd here. LAN clients still resolve `ssh ax3600` because the
+# generated /etc/hosts maps both `ax3600` and `ax3600.lan` to the same
+# IP, and resolved (on 10.0.0.1) reads /etc/hosts.
 
 [IPv6SendRA]
 # Tell LAN clients to use the router's GUA for DNS (resolved listens on it,
 # see resolved-router.conf). M/O flags stay unset → pure SLAAC.
 EmitDNS=yes
 DNS=2a01:e0a:97f:5432::1
+# Push `lan` as DNS search domain via RA option 31 (RFC 8106) so v6
+# clients can `ssh ax3600` and have it complete to `ax3600.lan`. v4
+# clients get the same UX from /etc/hosts bare-name aliases.
+EmitDomains=yes
+Domains=lan
 
 [IPv6Prefix]
 Prefix=2a01:e0a:97f:5432::/64

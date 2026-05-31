@@ -71,12 +71,14 @@ psk_secret = "wifi/psk-iot"
 # ---- per-AP ----------------------------------------------------------
 
 [aps.ax3600]
-hostname = "ap-ax3600"
+# `host` references the [[hosts]] entry in the repo-root hosts.toml that
+# owns this AP's hostname + management IP. Single source of truth — the
+# router's DNS / /etc/hosts and the AP's own UCI both come from there.
+host = "ap-ax3600"
 target = "qualcommax/ipq807x"
 profile = "xiaomi_ax3600"
 version = "25.12.0"
 sha256 = "347898b4dec0e8b3fe771a33c912d7191556251c8b20f19a680b6f35120326d8"
-management_ip = "10.0.0.2"
 extra_packages = ["ath11k-firmware-ipq8074"]
 
 # Radios listed in order — position in this array becomes radio0, radio1,
@@ -102,12 +104,11 @@ htmode = "HE40"
 channel = 5
 
 [aps.r3g]
-hostname = "ap-r3g"
+host = "ap-r3g"
 target = "ramips/mt7621"
 profile = "xiaomi_mi-router-3g"
 version = "25.12.0"
 sha256 = "cc4cc7642ea7c26c8d57695466b86ec7c9c837585aa89649f8da700a6fdb1460"
-management_ip = "10.0.0.3"
 extra_packages = []
 
 [[aps.r3g.radios]]

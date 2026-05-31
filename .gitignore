@@ -18,3 +18,4 @@ aps/build/
 aps/secrets/*
 !aps/secrets/README.md
 aps/**/__pycache__/
+routerbuild/**/__pycache__/

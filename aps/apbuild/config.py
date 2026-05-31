@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import ipaddress
 import re
+import sys
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,11 +21,17 @@ from pathlib import Path
 # Repo-root-relative paths. Resolved once at module load so callers don't
 # depend on the working directory.
 APS_ROOT: Path = Path(__file__).resolve().parent.parent
+REPO_ROOT: Path = APS_ROOT.parent
 DOWNLOADS_DIR: Path = APS_ROOT / "downloads"
 BUILD_DIR: Path = APS_ROOT / "build"
 COMMON_DIR: Path = APS_ROOT / "common"
 SECRETS_DIR: Path = APS_ROOT / "secrets"
 CONFIG_PATH: Path = APS_ROOT / "config.toml"
+HOSTS_TOML_PATH: Path = REPO_ROOT / "hosts.toml"
+
+# routerbuild lives at the repo root alongside hosts.toml.
+sys.path.insert(0, str(REPO_ROOT))
+from routerbuild.config import HostsConfig  # noqa: E402
 
 
 class ConfigError(Exception):
@@ -156,7 +163,11 @@ class FleetConfig:
     aps: dict[str, APSpec]
 
     @classmethod
-    def load(cls, path: Path = CONFIG_PATH) -> FleetConfig:
+    def load(
+        cls,
+        path: Path = CONFIG_PATH,
+        hosts_path: Path = HOSTS_TOML_PATH,
+    ) -> FleetConfig:
         if not path.is_file():
             raise ConfigError(f"Fleet config not found: {path}")
         try:
@@ -166,9 +177,14 @@ class FleetConfig:
 
         _check_keys(data, {"common", "aps"}, f"{path} (top level)")
 
+        # Load the shared hosts.toml to resolve each AP's hostname +
+        # management_ip from its `host` reference. Errors there bubble
+        # up as the same ConfigError type.
+        hosts_cfg = HostsConfig.load(hosts_path)
+
         common = _parse_common(_require_section(data, "common", path))
         aps_raw = _require_section(data, "aps", path)
-        aps = {name: _parse_ap(name, body) for name, body in aps_raw.items()}
+        aps = {name: _parse_ap(name, body, hosts_cfg) for name, body in aps_raw.items()}
         if not aps:
             raise ConfigError(f"{path}: [aps] must contain at least one AP")
 
@@ -317,13 +333,13 @@ def _parse_ssids(d: dict) -> tuple[Ssid, ...]:
     return tuple(out)
 
 
-def _parse_ap(name: str, d: dict) -> APSpec:
+def _parse_ap(name: str, d: dict, hosts_cfg: HostsConfig) -> APSpec:
     section = f"[aps.{name}]"
     if not isinstance(d, dict):
         raise ConfigError(f"{section} must be a table")
     _check_keys(d, {
-        "hostname", "target", "version", "profile", "sha256",
-        "management_ip", "extra_packages", "radios",
+        "host", "target", "version", "profile", "sha256",
+        "extra_packages", "radios",
     }, section)
 
     target = _req_str(d, "target", section)
@@ -337,8 +353,20 @@ def _parse_ap(name: str, d: dict) -> APSpec:
     sha = _req_str(d, "sha256", section)
     if not _SHA256_RE.match(sha):
         raise ConfigError(f"{section}.sha256: expected 64-hex-char sha256, got {sha!r}")
-    mip = _req_str(d, "management_ip", section)
-    _validate_ipv4(mip, f"{section}.management_ip")
+
+    # hostname + management_ip come from the shared hosts.toml entry
+    # referenced by `host`. APs must sit on the lan VLAN — the iot
+    # bridge is for untrusted devices.
+    host_ref = _req_str(d, "host", section)
+    try:
+        host_entry = hosts_cfg.host_by_name(host_ref)
+    except Exception as exc:
+        raise ConfigError(f"{section}.host {host_ref!r}: {exc}") from exc
+    if host_entry.vlan != "lan":
+        raise ConfigError(
+            f"{section}.host {host_ref!r} sits on vlan {host_entry.vlan!r};"
+            " APs must be on the trusted 'lan' VLAN"
+        )
 
     radios_raw = d.get("radios")
     if not isinstance(radios_raw, list) or not radios_raw:
@@ -353,12 +381,12 @@ def _parse_ap(name: str, d: dict) -> APSpec:
 
     return APSpec(
         name=name,
-        hostname=_req_str(d, "hostname", section),
+        hostname=host_entry.name,
         target=target,
         version=version,
         profile=_req_str(d, "profile", section),
         sha256=sha,
-        management_ip=mip,
+        management_ip=str(host_entry.ipv4),
         extra_packages=extra_pkgs,
         radios=radios,
     )
