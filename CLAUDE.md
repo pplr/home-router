@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Minimal Yocto Whinlatter (5.3) image for a Fujitsu Futro S920 home router.
+Minimal Yocto Wrynose (6.0) image for a Fujitsu Futro S920 home router.
 
 **Target hardware:** Fujitsu Futro S920 — AMD GX-222GC (x86-64), 4GB RAM, 8GB mSATA SSD, 3 NICs.
 
@@ -23,9 +23,9 @@ Note: `oe-init-build-env` changes the working directory to `build/`. Requires ~5
 ## Architecture
 
 - **layers/** — Yocto/OE layers:
-  - `openembedded-core` — core metadata and `oe-init-build-env` script (git submodule, `whinlatter` branch)
-  - `meta-yocto` — Poky distro policy (`meta-poky`) and BSP (`meta-yocto-bsp`) (git submodule, `whinlatter` branch)
-  - `bitbake` — build engine (git submodule, `whinlatter` branch)
+  - `openembedded-core` — core metadata and `oe-init-build-env` script (git submodule, `wrynose` branch)
+  - `meta-yocto` — Poky distro policy (`meta-poky`) and BSP (`meta-yocto-bsp`) (git submodule, `wrynose` branch)
+  - `bitbake` — build engine (git submodule, `wrynose` branch)
   - `meta-rauc` — RAUC update framework layer (git submodule, `master` branch)
   - `meta-futro-s920` — custom BSP layer for the Fujitsu Futro S920 (checked in, not a submodule)
 - **build/conf/** — build configuration (checked in):

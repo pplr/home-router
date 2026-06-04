@@ -56,9 +56,11 @@ do_install() {
 }
 
 # Generate the declarative bits (static-lease drop-ins, resolved local-zone
-# drop-in) from hosts.toml. Runs after the shell do_install so the parent
-# directories already exist in ${D}.
-python do_install:append() {
+# drop-in) from hosts.toml. Attached as a postfunc rather than
+# `python do_install:append` because mixing shell `do_X:append` and
+# `python do_X:append` text-merges both bodies into the base shell task,
+# breaking the shell dep parser.
+python do_install_hosts() {
     import pathlib, sys
     sys.path.insert(0, d.getVar("ROUTERBUILD_ROOT"))
     from routerbuild.config import HostsConfig
@@ -69,6 +71,7 @@ python do_install:append() {
     write_network_dropins(cfg, sysconf / "systemd" / "network")
     write_resolved_dropin(cfg, sysconf / "systemd" / "resolved.conf.d")
 }
+do_install[postfuncs] += "do_install_hosts"
 
 # Re-run do_install whenever hosts.toml or the routerbuild generator
 # changes. Without this, bitbake's task-signature would only hash the

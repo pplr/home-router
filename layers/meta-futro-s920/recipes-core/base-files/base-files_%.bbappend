@@ -22,9 +22,10 @@ do_install:append() {
 
 # Replace upstream /etc/hosts with one generated from hosts.toml so every
 # declared device is reachable by name (and by FQDN under .lan) from the
-# router shell. Runs after the shell do_install so /etc/hosts written by
-# upstream base-files is overwritten last.
-python do_install:append() {
+# router shell. Attached as a postfunc rather than `python do_install:append`
+# because mixing shell `do_X:append` and `python do_X:append` text-merges
+# both bodies into the base shell task, breaking the shell dep parser.
+python do_install_hosts() {
     import pathlib, sys
     sys.path.insert(0, d.getVar("ROUTERBUILD_ROOT"))
     from routerbuild.config import HostsConfig
@@ -34,6 +35,7 @@ python do_install:append() {
     out = pathlib.Path(d.getVar("D") + d.getVar("sysconfdir")) / "hosts"
     write_etc_hosts(cfg, out)
 }
+do_install[postfuncs] += "do_install_hosts"
 
 do_install[file-checksums] += " \
     ${HOSTS_TOML}:True \
