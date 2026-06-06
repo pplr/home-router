@@ -45,6 +45,8 @@ Note: `oe-init-build-env` changes the working directory to `build/`. Requires ~5
 
 The image uses RAUC for safe, atomic A/B partition updates with automatic rollback.
 
+**Only the rootfs slots are in the A/B scheme.** A RAUC bundle (`RAUC_BUNDLE_SLOTS = "rootfs"`; `system.conf` defines only `slot.rootfs.0`/`.1`) writes the new kernel+rootfs to the inactive slot and swaps — nothing else. The **bootloader (`barebox.efi`) and `state.dtb` live on the ESP (partition 1), and the bootchooser state lives on partition 2; neither is touched by RAUC.** There is no `[slot.bootloader.*]` and no install hook. Consequence: a Yocto upgrade that bumps barebox (e.g. Whinlatter `2025.09` → Wrynose `2026.04`) rebuilds barebox into `tmp/deploy/` but that binary **never reaches a device via `rauc install`** — the device keeps running the barebox already on its ESP. The new barebox only lands on a full `.wic` flash (fresh SSD / disaster recovery), via the `bootimg-barebox-efi` wic plugin. This is deliberate: keeping the bootloader out of the rollback path means an OS update can't brick the bootloader. To intentionally update barebox on a running device you must reflash the ESP by hand (no automatic rollback — keep a SystemRescue USB handy).
+
 ### Partition Layout (8GB SSD)
 
 | # | Label | Size | Type | Purpose |
@@ -111,6 +113,15 @@ Development CA and signing keys are in `layers/meta-futro-s920/files/rauc-keys/`
 
 **ESP must be mounted for `barebox-state` on x86:** The `barebox-state` userspace tool (dt-utils) reads the state DTB from the filesystem. On x86 EFI (no `/proc/device-tree`), it relies on `state.dtb` being accessible at `/boot/EFI/barebox/state.dtb`. The ESP must be mounted at `/boot` in fstab, otherwise `barebox-state` fails with: `Unable to read devicetree. No such file or directory`. RAUC depends on `barebox-state` to determine slot states.
 
+**`state.dts` is the bootchooser-state ABI — keep it frozen across upgrades:** The on-disk format of the bootchooser state (partition 2) is defined *entirely* by `recipes-bsp/barebox/barebox/state.dts`, **not** by the version of barebox or `barebox-state`. Both the on-ESP barebox and the userland `barebox-state` (dt-utils) read the *same* `state.dtb` and derive the magic (`0x4d433230`), `backend-type`/`backend-storage-type`/`backend-stridesize`, and every variable's byte offset and type from it. This is what makes upgrades safe: a Yocto bump that moves barebox (e.g. Whinlatter's `2025.09` → Wrynose's `2026.04`) or `dt-utils` cannot write an incompatible state on its own, because neither tool carries an independent layout — and a RAUC update doesn't even reflash the ESP barebox (see the note at the top of "A/B Update System" — only the rootfs slots are in the A/B scheme). The format is magic- + CRC-guarded with redundant copies, so a mismatch fails *closed* (reader rejects on bad magic/CRC → bootchooser falls back to the compiled defaults and boots the default slot), never silent corruption.
+
+Consequences for maintenance:
+
+- **Treat any edit to `state.dts` as an ABI break.** Reordering/adding/removing variables, changing a `reg` offset, the `magic`, `backend-storage-type` (`direct`↔`circular`), or `backend-stridesize` changes the on-disk layout. An ESP barebox compiled against the old DTS and a new `state.dtb` (or vice versa) will disagree.
+- **`state.dtb` only reaches the device on a full `.wic` flash**, via the `bootimg-barebox-efi` wic plugin — *not* via RAUC. So if you must change `state.dts`, you have to reflash the ESP (full flash, or a deliberate manual ESP update) and accept a one-time state reset; you cannot ship a state-layout change through a normal RAUC bundle.
+- **`barebox-state` (dt-utils, from `meta-rauc`) only ever reads `state.dtb` and writes the raw backend partition** — it never rewrites `state.dtb`, so the layout source-of-truth cannot drift at runtime.
+- **If you ever bump `dt-utils` in `meta-rauc`,** the only theoretical risk is a barebox state *format-version* bump while an old barebox stays on the ESP. These are rare and backward-compatible, and the magic/CRC guard keeps them fail-closed — but keep barebox, `barebox-state`, and `state.dtb` in the same era when you do a full reflash. Keep the offsets stable (the comment header in `state.dts` already says so).
+
 ### Notes
 
 - Device paths in `system.conf` use `PARTUUID`/`by-partuuid` references, so the image works on both real hardware (`/dev/sda`) and QEMU with virtio (`/dev/vda`) without changes.
@@ -150,6 +161,8 @@ Source dirs on `/data` are created on first mount by `futro-data-prep.service` (
 ### Configuration Pitfalls
 
 **`passwd-expire` is poison with A/B updates:** the `extrausers` directive `passwd-expire <user>;` forces a password change on first login. With a static-rootfs A/B model the new hash lives only in the active slot's `/etc/shadow` and is wiped on the next RAUC swap, so the user gets prompted to change password on every update. Solution: bake a real hash via the secrets mechanism and **do not** use `passwd-expire`.
+
+**Don't mask a systemd unit with a `/dev/null` symlink at do_install — drop it from the build instead:** chrony is the sole NTP daemon, so `systemd-timesyncd` must not also run (two clients racing for the clock causes spurious time jumps). The tempting fix — `ln -sf /dev/null ${D}${sysconfdir}/systemd/system/systemd-timesyncd.service` in a bbappend — *works at runtime but breaks the image build*: at `do_rootfs`, `systemctl preset-all` enumerates the masked symlink and prints `Failed to preset all unit: Unit …/systemd-timesyncd.service is masked`. preset-all ignores it and continues, but OE's `log_check` greps the rootfs log for failure patterns, matches `Failed`, and fails `do_rootfs`. Fix: remove the unit from the systemd build entirely with `PACKAGECONFIG:remove = "timesyncd"` in `recipes-core/systemd/systemd_%.bbappend` — no binary, no unit, nothing for preset-all to trip on. (General rule: prefer omitting an unwanted systemd service from its recipe over masking it in the rootfs.)
 
 **fstab bind mounts need ordering:** `data.mount` and any `/data/...` bind mount in fstab both target `local-fs.target`. Without explicit ordering the bind mount can fire before the source directory exists. Use `x-systemd.requires=futro-data-prep.service` on the bind mount entry — that pulls in the oneshot which creates source dirs after `data.mount` and before journald starts.
 

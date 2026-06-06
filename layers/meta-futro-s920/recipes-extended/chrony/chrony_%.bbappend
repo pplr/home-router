@@ -7,13 +7,6 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 PACKAGECONFIG:append = " ipv6"
 
 # Our chrony.conf (resolved via FILESEXTRAPATHS) replaces the upstream one
-# in the SRC_URI fetch. Additionally mask systemd-timesyncd: two NTP
-# clients racing for the system clock causes spurious time jumps. The
-# /dev/null symlink is systemd's standard "this unit is masked" mechanism
-# and is a no-op if timesyncd is not installed.
-do_install:append() {
-    install -d ${D}${sysconfdir}/systemd/system
-    ln -sf /dev/null ${D}${sysconfdir}/systemd/system/systemd-timesyncd.service
-}
-
-FILES:${PN} += "${sysconfdir}/systemd/system/systemd-timesyncd.service"
+# in the SRC_URI fetch. systemd-timesyncd is dropped from the systemd build
+# entirely (see recipes-core/systemd/systemd_%.bbappend) so there is no
+# competing NTP client to mask here.

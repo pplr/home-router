@@ -1,0 +1,51 @@
+From: Pierre Paysant-Le Roux <ppaysant@gmail.com>
+Date: Thu, 5 Jun 2026 00:00:00 +0000
+Subject: [PATCH] x86: efi: use pei target + --subsystem for binutils >= 2.46
+
+binutils 2.46 (shipped by Yocto Wrynose) removed the legacy
+efi-app-ia32 / efi-app-x86_64 BFD target vectors. The x86 EFI image
+rule passes the EFI target to objcopy via --target, which sets *both*
+the input and output format; with the alias gone objcopy tries to read
+the ELF `barebox` as the (now only) PE vector and fails with:
+
+    objcopy: barebox: file format not recognized
+
+Switch to the surviving PE target names (pei-i386 / pei-x86-64) and use
+--output-target so the ELF input is auto-detected, plus --subsystem
+efi-app to set the PE subsystem field to 0x0a (EFI application) which
+the removed efi-app-* vectors used to set implicitly.
+
+Upstream-Status: Pending
+
+Signed-off-by: Pierre Paysant-Le Roux <ppaysant@gmail.com>
+---
+ arch/x86/Makefile | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/arch/x86/Makefile b/arch/x86/Makefile
+index 1111111..2222222 100644
+--- a/arch/x86/Makefile
++++ b/arch/x86/Makefile
+@@ -9,9 +9,9 @@ TEXT_BASE = $(CONFIG_TEXT_BASE)
+ machine-y := efi
+ KBUILD_CFLAGS += -fpic -mno-sse -mno-mmx
+ ifeq ($(CONFIG_X86_32),y)
+-	TARGET = efi-app-ia32
++	TARGET = pei-i386
+ else
+-	TARGET = efi-app-x86_64
++	TARGET = pei-x86-64
+ endif
+
+ ifeq ($(CONFIG_X86_32),y)
+@@ -62,7 +62,7 @@ KBUILD_LDFLAGS := --no-undefined
+
+ OBJCOPYFLAGS_barebox.efi = \
+ 	-j .text -j .sdata -j .data -j .dynamic -j .dynsym -j .rel -j .rela \
+-	-j .reloc -j .bbenv.* -j .bblogo.* -j .barebox_imd --target=$(TARGET)
++	-j .reloc -j .bbenv.* -j .bblogo.* -j .barebox_imd --subsystem efi-app --output-target=$(TARGET)
+
+ barebox.efi: $(KBUILD_BINARY) FORCE
+ 	$(call if_changed,objcopy)
+--
+2.45.0

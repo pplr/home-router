@@ -6,6 +6,7 @@ SRC_URI:append:futro-s920 = " \
     file://bootchooser.cfg \
     file://env \
     file://state.dts \
+    file://0001-x86-efi-use-pei-target-and-subsystem-for-binutils-2..patch \
 "
 
 # dtc is needed to compile the barebox state description into state.dtb,
