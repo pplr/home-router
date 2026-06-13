@@ -122,3 +122,31 @@ path = "1e140000.pcie/pci0000:00/0000:00:01.0/0000:02:00.0"
 band = "5g"
 htmode = "VHT80"
 channel = 161
+
+[aps.ax59u]
+host = "ap-ax59u"
+target = "mediatek/filogic"
+profile = "asus_rt-ax59u"
+version = "25.12.4"
+sha256 = "8207da9d689f02d42833e4e8abc9eabb4ec63a433a7a26473296d3d2c489e257"
+extra_packages = []
+# Stream this AP's metrics to the router's netdata (parent). Setting this
+# pulls in the `netdata` package and generates /etc/netdata/stream.conf.
+# Only enable on APs with RAM/flash headroom (not the r3g).
+netdata = true
+
+# ASUS RT-AX59U — MediaTek MT7986A (Filogic 830). Single internal MT7976
+# DBDC radio exposes two bands: band0 (2.4 GHz) at the SoC wifi node and
+# band1 (5 GHz) at the same node +1. RF settings mirror r3g.
+
+[[aps.ax59u.radios]]
+path = "platform/18000000.wifi"
+band = "2g"
+htmode = "HT20"
+channel = 1
+
+[[aps.ax59u.radios]]
+path = "platform/18000000.wifi+1"
+band = "5g"
+htmode = "VHT80"
+channel = 161

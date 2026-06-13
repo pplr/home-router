@@ -34,6 +34,8 @@ def render_all(spec: APSpec, common: CommonConfig, secrets: Secrets) -> None:
     _rewrite_shadow(spec, secrets)
     _install_authorized_keys(spec, secrets)
     _install_dropbear_host_keys(spec, secrets)
+    if spec.netdata:
+        _generate_and_write_netdata_stream(spec, common, secrets)
 
 
 # ---- /etc/config/system -----------------------------------------------
@@ -270,3 +272,36 @@ def _install_dropbear_host_keys(spec: APSpec, secrets: Secrets) -> None:
         path = dropbear_dir / name
         path.write_bytes(blob)
         os.chmod(path, 0o600)
+
+
+# ---- /etc/netdata/stream.conf -----------------------------------------
+
+
+def _generate_and_write_netdata_stream(
+    spec: APSpec, common: CommonConfig, secrets: Secrets
+) -> None:
+    """Turn the AP's netdata into a streaming child of the router (parent).
+
+    Only called for APs with ``netdata = true``. netdata ships no
+    stream.conf by default, so this fresh file doesn't mask the package's
+    /etc/netdata/netdata.conf — the local agent keeps its defaults and
+    additionally forwards every metric to the router at ``router.ipv4``.
+    The API key is the shared secret the router's parent must match.
+    """
+
+    if secrets.netdata_stream_api_key is None:  # defensive — load_all guarantees this
+        raise RenderError(
+            f"{spec.name}: netdata=true but stream api key was not loaded"
+        )
+
+    out_path = spec.staged_files_dir / "etc" / "netdata" / "stream.conf"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(
+        f"[stream]\n"
+        f"\tenabled = yes\n"
+        f"\tdestination = {common.router.ipv4}:19999\n"
+        f"\tapi key = {secrets.netdata_stream_api_key}\n",
+        encoding="utf-8",
+    )
+    # Contains the streaming API key — restrict mode like wireless.
+    os.chmod(out_path, 0o600)

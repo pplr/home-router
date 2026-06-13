@@ -10,3 +10,8 @@ IPv6AcceptRA=no
 LLDP=no
 EmitLLDP=no
 ConfigureWithoutCarrier=yes
+# Reverse-path filtering on this IP-less L2 bridge has no value (no routing
+# decision to protect) but trips the kernel martian-source logger on every
+# Freebox-Player gateway ARP (~1 Hz). Disable it here; WAN martian logging
+# (net.ipv4.conf.all.log_martians=1) stays intact for genuine threats.
+IPv4ReversePathFilter=no

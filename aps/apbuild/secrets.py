@@ -41,6 +41,8 @@ class Secrets:
     dropbear_ed25519_host_key: bytes
     dropbear_rsa_host_key: bytes
     psks: dict[str, str] = field(default_factory=dict)
+    # Only loaded for APs with `netdata = true`; None otherwise.
+    netdata_stream_api_key: str | None = None
 
 
 # Relative paths under SECRETS_DIR for secrets that are constant across
@@ -52,18 +54,31 @@ STATIC_SECRET_FILES: dict[str, str] = {
     "dropbear_rsa_host_key": "ssh/dropbear_rsa_host_key",
 }
 
+# Path (under SECRETS_DIR) of the netdata streaming API key — the shared
+# UUID the child sends and the router's netdata parent must match. Only
+# required when building an AP with ``netdata = true``.
+NETDATA_STREAM_API_KEY_FILE = "netdata/stream_api_key"
 
-def load_all(common: CommonConfig) -> Secrets:
+
+def load_all(common: CommonConfig, *, need_netdata_key: bool = False) -> Secrets:
     """Read every required secret eagerly; fail fast on any missing one.
 
     PSK file paths are pulled from ``common.ssids[*].psk_secret`` so
     adding/removing an SSID in ``config.toml`` automatically changes
     which PSK files are required (or no longer required).
+
+    ``need_netdata_key`` is set by the caller when the AP being built has
+    ``netdata = true``; only then is the (gitignored) streaming API key
+    required, so APs without netdata don't force the file to exist.
     """
 
     psks: dict[str, str] = {}
     for ssid in common.ssids:
         psks[ssid.psk_secret] = _read_text(ssid.psk_secret)
+
+    netdata_key = (
+        _read_text(NETDATA_STREAM_API_KEY_FILE) if need_netdata_key else None
+    )
 
     return Secrets(
         root_password_hash=_read_text(STATIC_SECRET_FILES["root_password_hash"]),
@@ -77,6 +92,7 @@ def load_all(common: CommonConfig) -> Secrets:
             STATIC_SECRET_FILES["dropbear_rsa_host_key"]
         ),
         psks=psks,
+        netdata_stream_api_key=netdata_key,
     )
 
 

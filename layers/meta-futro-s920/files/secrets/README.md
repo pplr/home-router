@@ -10,6 +10,7 @@ at recipe parse / `do_install` time to bake static identity into the image:
 | `ssh/ssh_host_ed25519_key{,.pub}` | `openssh_%.bbappend` | Baked-in ed25519 host key |
 | `ssh/ssh_host_rsa_key{,.pub}` | `openssh_%.bbappend` | Baked-in RSA host key |
 | `ssh/ssh_host_ecdsa_key{,.pub}` | `openssh_%.bbappend` | Baked-in ECDSA host key |
+| `netdata/stream_api_key` | `netdata_%.bbappend` → `/etc/netdata/stream.conf` | netdata streaming API key (UUID). Registers the parent so child APs may stream. Must be identical to each streaming AP's `aps/secrets/netdata/stream_api_key`. |
 
 If any of these is missing, the build fails fast with a clear `bb.fatal` message.
 
@@ -38,6 +39,11 @@ mkdir -p "$SECRETS/ssh"
 ssh-keygen -t ed25519 -N '' -f "$SECRETS/ssh/ssh_host_ed25519_key" -C home-router
 ssh-keygen -t rsa -b 4096 -N '' -f "$SECRETS/ssh/ssh_host_rsa_key" -C home-router
 ssh-keygen -t ecdsa -b 256 -N '' -f "$SECRETS/ssh/ssh_host_ecdsa_key" -C home-router
+
+# 4. netdata streaming API key (UUID). Generate ONCE, then copy the SAME
+#    value to every streaming AP's aps/secrets/netdata/stream_api_key.
+mkdir -p "$SECRETS/netdata"
+uuidgen > "$SECRETS/netdata/stream_api_key"     # or: python3 -c 'import uuid;print(uuid.uuid4())'
 ```
 
 ## Rotating

@@ -141,6 +141,7 @@ Secrets baked into the image (password hash, SSH host keys, machine-id) live und
 | `pplr.hash` | `core-image-minimal.bbappend` (extrausers) | `mkpasswd -m sha512crypt -R 500000` |
 | `machine-id` | `base-files_%.bbappend` | `python3 -c "import uuid; print(uuid.uuid4().hex)"` |
 | `ssh/ssh_host_{ed25519,rsa}_key{,.pub}` | `openssh_%.bbappend` | `ssh-keygen -t {ed25519,rsa} -N '' -f ...` |
+| `netdata/stream_api_key` | `netdata_%.bbappend` (streaming parent) | `uuidgen` — **same UUID must also live in each streaming AP's `aps/secrets/netdata/stream_api_key`** |
 
 To rotate any secret: regenerate the file, rebuild, deploy via RAUC. Hostname (`home-router`) is *not* a secret and is committed at `recipes-core/base-files/base-files/hostname`.
 

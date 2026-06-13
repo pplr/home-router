@@ -2,8 +2,10 @@ SUMMARY = "Remote syslog collector for the home-network APs"
 DESCRIPTION = " \
     Configures rsyslog to listen on udp/514 bound to 10.0.0.1 (LAN \
     only) and forward incoming messages from 10.0.0.0/24 into the \
-    systemd journal via omjournal. Lets `journalctl _HOSTNAME=ap-…` \
-    surface the OpenWrt APs' logs alongside the router's own. \
+    systemd journal via omjournal. Lets `journalctl REMOTE_HOST=ap-…` \
+    surface a given OpenWrt AP's logs alongside the router's own \
+    (NOT `_HOSTNAME`, a journald-stamped field that always reads \
+    `home-router` on the local-journald path — see 10-remote.conf). \
 "
 LICENSE = "MIT"
 LIC_FILES_CHKSUM = "file://${COREBASE}/meta/COPYING.MIT;md5=3da9cfbcb788c80a0384361b4de20420"

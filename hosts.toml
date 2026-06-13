@@ -66,3 +66,9 @@ name    = "ap-r3g"
 ipv4    = "10.0.0.3"
 vlan    = "lan"
 aliases = ["r3g"]
+
+[[hosts]]
+name    = "ap-ax59u"
+ipv4    = "10.0.0.4"
+vlan    = "lan"
+aliases = ["ax59u"]
