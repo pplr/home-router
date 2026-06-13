@@ -1,4 +1,4 @@
-IMAGE_INSTALL:append = " rauc sudo systemd-networkd futro-network-conf futro-firewall futro-persistent-state syslog-collector chrony tzdata-core openssh-sshd openssh-sftp-server netdata kernel-modules kbd kbd-consolefonts kbd-keymaps futro-console-conf linux-firmware-amdgpu fbset"
+IMAGE_INSTALL:append = " rauc sudo systemd-networkd futro-network-conf futro-firewall futro-persistent-state syslog-collector chrony tzdata-core openssh-sshd openssh-sftp-server netdata kernel-modules kbd kbd-consolefonts kbd-keymaps futro-console-conf linux-firmware-amdgpu linux-firmware-rtl8168 fbset"
 
 # Show boot messages instead of splash screen
 SPLASH = ""
