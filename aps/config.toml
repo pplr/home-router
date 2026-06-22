@@ -35,7 +35,16 @@ iot_vlan = 30
 # Image Builder `PACKAGES=` is built from common.packages.add ∪ common.packages.remove
 # ∪ aps.<name>.extra_packages, deduped while preserving insertion order.
 # A leading `-` removes the package; everything else adds.
-add = ["wpad-mbedtls"]
+#
+# prometheus-node-exporter-lua exposes node metrics on :9100 for the router's
+# netdata to scrape (go.d/prometheus). The Lua exporter is current on OpenWrt
+# (unlike the stale packaged netdata agent) and light enough for every AP; the
+# -wifi_stations collector adds per-associated-client signal metrics.
+add = [
+    "wpad-mbedtls",
+    "prometheus-node-exporter-lua",
+    "prometheus-node-exporter-lua-wifi_stations",
+]
 remove = [
     "wpad-basic-mbedtls",
     "dnsmasq",
@@ -130,10 +139,6 @@ profile = "asus_rt-ax59u"
 version = "25.12.4"
 sha256 = "8207da9d689f02d42833e4e8abc9eabb4ec63a433a7a26473296d3d2c489e257"
 extra_packages = []
-# Stream this AP's metrics to the router's netdata (parent). Setting this
-# pulls in the `netdata` package and generates /etc/netdata/stream.conf.
-# Only enable on APs with RAM/flash headroom (not the r3g).
-netdata = true
 
 # ASUS RT-AX59U — MediaTek MT7986A (Filogic 830). Single internal MT7976
 # DBDC radio exposes two bands: band0 (2.4 GHz) at the SoC wifi node and

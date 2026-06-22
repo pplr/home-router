@@ -141,7 +141,6 @@ Secrets baked into the image (password hash, SSH host keys, machine-id) live und
 | `pplr.hash` | `core-image-minimal.bbappend` (extrausers) | `mkpasswd -m sha512crypt -R 500000` |
 | `machine-id` | `base-files_%.bbappend` | `python3 -c "import uuid; print(uuid.uuid4().hex)"` |
 | `ssh/ssh_host_{ed25519,rsa}_key{,.pub}` | `openssh_%.bbappend` | `ssh-keygen -t {ed25519,rsa} -N '' -f ...` |
-| `netdata/stream_api_key` | `netdata_%.bbappend` (streaming parent) | `uuidgen` — **same UUID must also live in each streaming AP's `aps/secrets/netdata/stream_api_key`** |
 
 To rotate any secret: regenerate the file, rebuild, deploy via RAUC. Hostname (`home-router`) is *not* a secret and is committed at `recipes-core/base-files/base-files/hostname`.
 
@@ -240,6 +239,35 @@ Stateful inet-family firewall shipped by the `futro-firewall` recipe (`recipes-e
 **systemd-networkd's DHCPv4 server receive path traverses netfilter; the send path does not:** `sd-dhcp-server` opens a regular UDP socket bound to the interface for inbound DHCPDISCOVER/REQUEST (`src/libsystemd-network/sd-dhcp-server.c:1325`) but sends replies via an `AF_PACKET` raw socket that bypasses netfilter. Consequence: any **untrusted** bridge with the DHCP server enabled needs an explicit `iifname "br-xxx" udp dport 67 accept` rule on `input`, or clients never get leases (silent drop, no log line beyond the chain's drop counter). `br-lan` doesn't need it because the catch-all `iifname "br-lan" accept` already covers DHCP; `br-iot` does because the trust model there is default-drop + narrow allow. No `output` rule is ever needed for DHCP replies.
 
 **IPv6 forwarding requires the *global* sysctl, IPv4 doesn't:** the two address families are not symmetric in the kernel. `ip_route_input_slow()` (`net/ipv4/route.c`) checks `IN_DEV_FORWARD(in_dev)` — i.e. *per-interface only* — so per-interface `IPv4Forwarding=yes` on `wan0` + `br-lan` is sufficient for IPv4. But `ip6_forward()` (`net/ipv6/ip6_output.c:513`) checks `net->ipv6.devconf_all->forwarding` *first* and drops the packet immediately if it's 0 — per-interface flags are not consulted at all when the global is 0. Setting `IPv6Forwarding=yes` in a `.network` file only writes `/proc/sys/net/ipv6/conf/<iface>/forwarding`; the global is written by `manager_set_ip_forwarding()` (`src/network/networkd-sysctl.c:200`), which is only invoked when the global setting is present in **`networkd.conf`**'s `[Network] IPv6Forwarding=`. We ship that as a `networkd.conf.d/router.conf` drop-in via `futro-network-conf`. Symptom if missing: LAN clients get GUAs and a default route, but every forwarded IPv6 packet is silently dropped by the router; the router itself can still `ping -6` the internet because locally-generated packets bypass `ip6_forward()`.
+
+## Monitoring
+
+netdata runs on the router as the single dashboard (`http://10.0.0.1:19999/`), with its
+metrics DB on `/data` so it survives A/B swaps. Configured by `netdata_%.bbappend`
+(`recipes-webadmin/netdata/`).
+
+**AP metrics use pull, not push.** Each OpenWrt AP runs `prometheus-node-exporter-lua` on
+`:9100` (added fleet-wide via `aps/config.toml` `[common.packages].add`; the
+`-wifi_stations` collector adds per-associated-client signal). The exporter binds to the AP's
+`br-lan` address (`listen_interface 'lan'` in the generated
+`/etc/config/prometheus-node-exporter-lua`, written by `apbuild.render`). The router's netdata
+**scrapes** each AP via its `go.d/prometheus` collector — one job per AP in
+`/etc/netdata/go.d/prometheus.conf`, with `prometheus: yes` enabled in `go.d.conf` (both
+emitted by the bbappend). The scrape job IPs mirror the AP management addresses in repo-root
+`hosts.toml` but are inlined in the bbappend (bitbake doesn't parse `hosts.toml`) — keep them
+in sync when adding an AP.
+
+No firewall change is needed: the scrape is router-initiated outbound (`output` policy is
+`accept`, return traffic is `established,related`). netdata itself stays LAN-only reachable
+via the `iifname "br-lan" accept` rule.
+
+**Why not the netdata agent on the APs:** OpenWrt's packaged netdata is far behind the
+router's (1.33.1 vs 1.47.5). The old design streamed the stale agent child→parent over a
+shared `stream_api_key` secret; that's gone — node-exporter is current, needs no secret, and
+the pull model keeps one pane of glass. **Why not collectd:** node-exporter-lua is fewer
+packages, a single UCI file, and is the canonical OpenWrt exporter; netdata has no native
+collectd collector anyway (it would still scrape collectd's `write_prometheus` over the same
+go.d/prometheus path).
 
 ## Barebox Bootloader
 

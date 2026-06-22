@@ -124,7 +124,6 @@ class APSpec:
     management_ip: str
     extra_packages: tuple[str, ...]
     radios: tuple[Radio, ...]
-    netdata: bool = False
 
     # ---- Derived URL / filesystem paths --------------------------------
 
@@ -205,7 +204,6 @@ class FleetConfig:
             *self.common.packages.add,
             *(f"-{p}" for p in self.common.packages.remove),
             *spec.extra_packages,
-            *(("netdata",) if spec.netdata else ()),
         ):
             if pkg not in seen:
                 seen.add(pkg)
@@ -341,7 +339,7 @@ def _parse_ap(name: str, d: dict, hosts_cfg: HostsConfig) -> APSpec:
         raise ConfigError(f"{section} must be a table")
     _check_keys(d, {
         "host", "target", "version", "profile", "sha256",
-        "extra_packages", "radios", "netdata",
+        "extra_packages", "radios",
     }, section)
 
     target = _req_str(d, "target", section)
@@ -381,12 +379,6 @@ def _parse_ap(name: str, d: dict, hosts_cfg: HostsConfig) -> APSpec:
         else []
     )
 
-    netdata = d.get("netdata", False)
-    if not isinstance(netdata, bool):
-        raise ConfigError(
-            f"{section}.netdata must be bool, got {type(netdata).__name__}"
-        )
-
     return APSpec(
         name=name,
         hostname=host_entry.name,
@@ -397,7 +389,6 @@ def _parse_ap(name: str, d: dict, hosts_cfg: HostsConfig) -> APSpec:
         management_ip=str(host_entry.ipv4),
         extra_packages=extra_pkgs,
         radios=radios,
-        netdata=netdata,
     )
 
 

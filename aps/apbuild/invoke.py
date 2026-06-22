@@ -38,7 +38,7 @@ def build_one(name: str, fleet: FleetConfig) -> Path:
     spec = fleet.aps[name]
 
     print(f"[build] {name}: checking secrets")
-    secrets = load_all(fleet.common, need_netdata_key=spec.netdata)
+    secrets = load_all(fleet.common)
 
     print(f"[build] {name}: ensuring Image Builder {spec.version} for {spec.target}")
     imagebuilder_dir = fetch.ensure(spec, fleet.common)

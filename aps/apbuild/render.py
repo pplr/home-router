@@ -34,8 +34,7 @@ def render_all(spec: APSpec, common: CommonConfig, secrets: Secrets) -> None:
     _rewrite_shadow(spec, secrets)
     _install_authorized_keys(spec, secrets)
     _install_dropbear_host_keys(spec, secrets)
-    if spec.netdata:
-        _generate_and_write_netdata_stream(spec, common, secrets)
+    _generate_and_write_node_exporter(spec)
 
 
 # ---- /etc/config/system -----------------------------------------------
@@ -274,34 +273,32 @@ def _install_dropbear_host_keys(spec: APSpec, secrets: Secrets) -> None:
         os.chmod(path, 0o600)
 
 
-# ---- /etc/netdata/stream.conf -----------------------------------------
+# ---- /etc/config/prometheus-node-exporter-lua -------------------------
 
 
-def _generate_and_write_netdata_stream(
-    spec: APSpec, common: CommonConfig, secrets: Secrets
-) -> None:
-    """Turn the AP's netdata into a streaming child of the router (parent).
+def _generate_and_write_node_exporter(spec: APSpec) -> None:
+    """Expose this AP's metrics for the router's netdata to scrape.
 
-    Only called for APs with ``netdata = true``. netdata ships no
-    stream.conf by default, so this fresh file doesn't mask the package's
-    /etc/netdata/netdata.conf — the local agent keeps its defaults and
-    additionally forwards every metric to the router at ``router.ipv4``.
-    The API key is the shared secret the router's parent must match.
+    Every AP runs prometheus-node-exporter-lua (pulled in via
+    common.packages); the router's netdata go.d/prometheus collector
+    scrapes http://<ap>:9100/metrics. ``listen_interface 'lan'`` binds the
+    exporter to the br-lan address only (not 0.0.0.0), keeping it off the
+    IoT/IPTV bridges. No secret involved — the scrape is unauthenticated
+    on the trusted LAN, same posture as the router's own netdata.
     """
 
-    if secrets.netdata_stream_api_key is None:  # defensive — load_all guarantees this
-        raise RenderError(
-            f"{spec.name}: netdata=true but stream api key was not loaded"
-        )
-
-    out_path = spec.staged_files_dir / "etc" / "netdata" / "stream.conf"
+    out_path = (
+        spec.staged_files_dir
+        / "etc"
+        / "config"
+        / "prometheus-node-exporter-lua"
+    )
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(
-        f"[stream]\n"
-        f"\tenabled = yes\n"
-        f"\tdestination = {common.router.ipv4}:19999\n"
-        f"\tapi key = {secrets.netdata_stream_api_key}\n",
+        f"config prometheus-node-exporter-lua 'prometheus_node_exporter_lua'\n"
+        f"\toption listen_interface 'lan'\n"
+        f"\toption listen_ipv6 '0'\n"
+        f"\toption listen_port '9100'\n",
         encoding="utf-8",
     )
-    # Contains the streaming API key — restrict mode like wireless.
-    os.chmod(out_path, 0o600)
+    os.chmod(out_path, 0o644)

@@ -9,15 +9,6 @@
 #                      three otherwise)
 PACKAGECONFIG = "openssl systemd webui_v2"
 
-# Streaming parent: accept metrics streamed from the OpenWrt APs that run
-# netdata as children (those with `netdata = true` in aps/config.toml). The
-# shared streaming API key is an out-of-tree secret (a UUID) — the SAME value
-# must live in each child AP's aps/secrets/netdata/stream_api_key. Resolved
-# from SECRETS_DIR/netdata via FILESEXTRAPATHS, like openssh's host keys; a
-# missing file fails the build at do_fetch naming the expected path.
-FILESEXTRAPATHS:prepend := "${SECRETS_DIR}/netdata:"
-SRC_URI += " file://stream_api_key"
-
 # Disable the /sys/class/drm sub-collector. netdata 1.47.5's
 # proc.plugin[/sys/class/drm] has a use-after-free that fires on the S920's
 # AMD GX-222GC iGPU: gpu_busy_percent is ENOTSUP and mem_busy_percent is
@@ -59,28 +50,31 @@ do_install:append() {
 	systemd-journal = no
 EOF
 
-    # Streaming parent registration. The child APs send this UUID as their
-    # stream "api key"; the parent only ingests keys it has an enabled
-    # section for. Key is read from the out-of-tree secret (stripped of any
-    # trailing newline by the command substitution).
+    # Scrape the OpenWrt APs. Each AP runs prometheus-node-exporter-lua on
+    # :9100 (see aps/config.toml common.packages); netdata's go.d/prometheus
+    # collector pulls http://<ap>:9100/metrics and charts it under the AP's
+    # job name. This replaces the old netdata-agent streaming (the packaged
+    # OpenWrt netdata was badly outdated) — pull instead of push, no shared
+    # secret, and no stale agent on the APs.
     #
-    # MUST be world-readable (0644): netdata's load_stream_conf()
-    # (src/streaming/rrdpush.c) reads stream.conf AFTER dropping to the
-    # `netdata` user, and on open failure it *silently* falls back to the
-    # stock config — which has no [<UUID>] section, so the parent rejects
-    # every child with "API key is not enabled". A 0640 root:root file
-    # reproduces exactly that. The key is only a LAN streaming token and the
-    # router is root-only access, so world-readable is acceptable here.
-    # NOTE: `allow from` is a netdata SIMPLE_PATTERN matched against the
-    # client IP *string* (rrdpush.c simple_pattern_create/-_matches), NOT a
-    # CIDR. `10.0.0.0/24` never matches `10.0.0.4` — use a glob (`10.0.0.*`).
-    stream_api_key="$(cat ${UNPACKDIR}/stream_api_key)"
-    cat > ${D}${sysconfdir}/netdata/stream.conf <<EOF
-[${stream_api_key}]
-	enabled = yes
-	allow from = 10.0.0.*
-	default memory mode = dbengine
-	health enabled by default = auto
+    # go.d.conf ships only `logind: yes`; flip the prometheus module on too.
+    cat > ${D}${sysconfdir}/netdata/go.d.conf <<'EOF'
+modules:
+    logind: yes
+    prometheus: yes
 EOF
-    chmod 0644 ${D}${sysconfdir}/netdata/stream.conf
+
+    # One scrape job per AP. IPs mirror the AP management addresses in the
+    # repo-root hosts.toml (source of truth); they're inlined here because a
+    # bitbake recipe doesn't parse hosts.toml. Keep in sync when adding an AP.
+    install -d ${D}${sysconfdir}/netdata/go.d
+    cat > ${D}${sysconfdir}/netdata/go.d/prometheus.conf <<'EOF'
+jobs:
+  - name: ap-ax3600
+    url: http://10.0.0.2:9100/metrics
+  - name: ap-r3g
+    url: http://10.0.0.3:9100/metrics
+  - name: ap-ax59u
+    url: http://10.0.0.4:9100/metrics
+EOF
 }
