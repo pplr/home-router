@@ -13,6 +13,8 @@ LIC_FILES_CHKSUM = "file://${COREBASE}/meta/COPYING.MIT;md5=3da9cfbcb788c80a0384
 SRC_URI = " \
     file://nftables.conf \
     file://nftables.service \
+    file://disable-bridge-nf.conf \
+    file://br_netfilter.conf \
 "
 
 S = "${UNPACKDIR}"
@@ -31,9 +33,23 @@ do_install() {
     install -d ${D}${systemd_system_unitdir}
     install -m 0644 ${UNPACKDIR}/nftables.service \
         ${D}${systemd_system_unitdir}/nftables.service
+
+    # Keep L2-switched intra-bridge traffic out of the nftables forward chain:
+    # force-load br_netfilter early, then pin its bridge-nf-call-* hooks off so
+    # same-bridge LAN traffic (e.g. laptop<->AP, both on br-lan) is plain
+    # switching. See disable-bridge-nf.conf / br_netfilter.conf for the full why.
+    install -d ${D}${sysconfdir}/sysctl.d
+    install -m 0644 ${UNPACKDIR}/disable-bridge-nf.conf \
+        ${D}${sysconfdir}/sysctl.d/disable-bridge-nf.conf
+
+    install -d ${D}${sysconfdir}/modules-load.d
+    install -m 0644 ${UNPACKDIR}/br_netfilter.conf \
+        ${D}${sysconfdir}/modules-load.d/br_netfilter.conf
 }
 
 FILES:${PN} = " \
     ${sysconfdir}/nftables.conf \
+    ${sysconfdir}/sysctl.d/disable-bridge-nf.conf \
+    ${sysconfdir}/modules-load.d/br_netfilter.conf \
     ${systemd_system_unitdir}/nftables.service \
 "
