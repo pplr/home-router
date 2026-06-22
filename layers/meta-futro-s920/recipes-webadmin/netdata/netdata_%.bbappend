@@ -7,7 +7,13 @@
 #                      runtime — see [plugins] systemd-journal = no.
 #   - add  webui_v2  : rm older v0/v1 web UIs from the rootfs (recipe ships all
 #                      three otherwise)
-PACKAGECONFIG = "openssl systemd webui_v2"
+#   - add  go        : builds go.d.plugin, which provides the `prometheus`
+#                      go.d collector that scrapes the OpenWrt APs' node-exporter
+#                      (the go.d/*.conf we write below are inert without it).
+#                      Gated upstream behind PACKAGECONFIG[go] (-DENABLE_PLUGIN_GO);
+#                      its do_compile fetches go modules, so the build host needs
+#                      network (do_compile[network]=1 is set when `go` is in).
+PACKAGECONFIG = "openssl systemd webui_v2 go"
 
 # Disable the /sys/class/drm sub-collector. netdata 1.47.5's
 # proc.plugin[/sys/class/drm] has a use-after-free that fires on the S920's

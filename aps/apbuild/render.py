@@ -295,7 +295,7 @@ def _generate_and_write_node_exporter(spec: APSpec) -> None:
     )
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(
-        f"config prometheus-node-exporter-lua 'prometheus_node_exporter_lua'\n"
+        f"config prometheus-node-exporter-lua 'main'\n"
         f"\toption listen_interface 'lan'\n"
         f"\toption listen_ipv6 '0'\n"
         f"\toption listen_port '9100'\n",
