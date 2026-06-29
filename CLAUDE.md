@@ -259,6 +259,17 @@ emitted by the bbappend). The scrape job IPs mirror the AP management addresses 
 `hosts.toml` but are inlined in the bbappend (bitbake doesn't parse `hosts.toml`) — keep them
 in sync when adding an AP.
 
+**Each AP is a virtual node, not metrics piled on the router.** Without vnodes every scraped
+series attaches to the router's own node, leaving the three APs indistinguishable in the
+dashboard. So the bbappend ships `/etc/netdata/vnodes/vnodes.conf` with one `hostname`+`guid`
+entry per AP, and each `go.d/prometheus` job carries a `vnode:` line whose value matches a
+vnode `hostname`. netdata then presents each AP as its own node (own menu entry, own host
+labels) even though the router's go.d does the collection. The GUIDs are **fixed in the
+recipe, never generated at build time**: netdata keys a node's metrics DB on `/data` by GUID,
+so a per-build GUID would orphan each AP's history on every RAUC update. When adding an AP,
+mint one fresh `uuidgen` for it and treat it as permanent; never reuse or regenerate an
+existing AP's GUID.
+
 No firewall change is needed: the scrape is router-initiated outbound (`output` policy is
 `accept`, return traffic is `established,related`). netdata itself stays LAN-only reachable
 via the `iifname "br-lan" accept` rule.

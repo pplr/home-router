@@ -70,17 +70,41 @@ modules:
     prometheus: yes
 EOF
 
+    # Virtual nodes: one per AP. Without this, every scraped metric is attached
+    # to the router's own node and the three APs are indistinguishable in the
+    # dashboard. A vnode gives each AP its own node in netdata (own menu entry,
+    # own host labels) even though the data is collected by the router's go.d.
+    # The job's `vnode:` value matches a vnode `hostname` below.
+    #
+    # GUIDs are FIXED (not generated at build time): netdata keys a node's
+    # metrics DB on /data by this GUID, so regenerating it per build would
+    # orphan the historical data on every RAUC update. Treat each GUID as
+    # permanent for that AP; assign a fresh `uuidgen` only when adding a new AP.
+    install -d ${D}${sysconfdir}/netdata/vnodes
+    cat > ${D}${sysconfdir}/netdata/vnodes/vnodes.conf <<'EOF'
+- hostname: ap-ax3600
+  guid: fea59aa7-1c15-4137-8482-96912d0d52a5
+- hostname: ap-r3g
+  guid: 274c21e7-e544-44f0-afa6-4480ca340249
+- hostname: ap-ax59u
+  guid: c4dbb8a8-48ca-40df-b195-5d894e470a03
+EOF
+
     # One scrape job per AP. IPs mirror the AP management addresses in the
     # repo-root hosts.toml (source of truth); they're inlined here because a
     # bitbake recipe doesn't parse hosts.toml. Keep in sync when adding an AP.
+    # Each job's `vnode:` attaches its metrics to the matching vnode above.
     install -d ${D}${sysconfdir}/netdata/go.d
     cat > ${D}${sysconfdir}/netdata/go.d/prometheus.conf <<'EOF'
 jobs:
   - name: ap-ax3600
+    vnode: ap-ax3600
     url: http://10.0.0.2:9100/metrics
   - name: ap-r3g
+    vnode: ap-r3g
     url: http://10.0.0.3:9100/metrics
   - name: ap-ax59u
+    vnode: ap-ax59u
     url: http://10.0.0.4:9100/metrics
 EOF
 }
