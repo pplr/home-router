@@ -72,3 +72,13 @@ name    = "ap-ax59u"
 ipv4    = "10.0.0.4"
 vlan    = "lan"
 aliases = ["ax59u"]
+
+# ---- reserved-lease clients ------------------------------------------
+# Devices with a `mac` get a DHCP reservation (always the same IPv4)
+# plus /etc/hosts + DNS.
+
+[[hosts]]
+name = "nas"
+ipv4 = "10.0.0.10"
+vlan = "lan"
+mac  = "c8:d3:ff:9e:80:c9"
