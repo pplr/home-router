@@ -1,0 +1,23 @@
+[Unit]
+Description=Prometheus node_exporter (host metrics)
+Documentation=https://github.com/prometheus/node_exporter
+After=network.target
+
+[Service]
+Type=simple
+# Stateless collector — let systemd allocate a transient unprivileged user.
+DynamicUser=yes
+# Bind to loopback only: metrics are consumed by the local VictoriaMetrics
+# scrape, never off-box. The APs expose their own :9100 on br-lan instead.
+ExecStart=/usr/bin/node_exporter --web.listen-address=127.0.0.1:9100
+Restart=on-failure
+RestartSec=5
+
+# Hardening — node_exporter only reads /proc and /sys, writes nothing.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

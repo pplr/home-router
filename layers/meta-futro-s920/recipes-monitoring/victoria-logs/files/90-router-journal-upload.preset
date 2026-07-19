@@ -1,0 +1,4 @@
+# Enable the journal → VictoriaLogs uploader. Applied by rootfs preset-all
+# (enable-only mode). systemd-journal-upload.service itself is provided by the
+# systemd package; its target URL is set by the router.conf drop-in.
+enable systemd-journal-upload.service

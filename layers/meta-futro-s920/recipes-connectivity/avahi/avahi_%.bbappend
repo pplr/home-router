@@ -4,8 +4,8 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/files:"
 # `dbus` PACKAGECONFIG: avahi-daemon.service ships as `Type=dbus`
 # (BusName=org.freedesktop.Avahi), so without D-Bus the daemon runs fine but
 # never acquires the bus name — systemd's readiness never fires and the unit is
-# SIGTERM'd at the start timeout. dbus is already in the image (systemd/netdata
-# pull it), so this costs nothing. Set explicitly to document the dependency.
+# SIGTERM'd at the start timeout. dbus is already in the image (systemd pulls
+# it), so this costs nothing. Set explicitly to document the dependency.
 PACKAGECONFIG = "dbus"
 
 SRC_URI += "file://avahi-daemon.conf"

@@ -1,0 +1,30 @@
+[Unit]
+Description=VictoriaMetrics single-node time-series database
+Documentation=https://docs.victoriametrics.com
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=victoria-metrics
+Group=victoria-metrics
+ExecStart=/usr/bin/victoria-metrics \
+    -storageDataPath=/var/lib/victoria-metrics \
+    -httpListenAddr=:8428 \
+    -promscrape.config=/etc/victoria-metrics/scrape.yml \
+    -retentionPeriod=12
+# SIGHUP reloads -promscrape.config without a restart.
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=1048576
+
+# Hardening
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/victoria-metrics
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

@@ -40,10 +40,10 @@ ssh-keygen -t rsa -b 4096 -N '' -f "$SECRETS/ssh/ssh_host_rsa_key" -C home-route
 ssh-keygen -t ecdsa -b 256 -N '' -f "$SECRETS/ssh/ssh_host_ecdsa_key" -C home-router
 ```
 
-> Note: AP metrics no longer use a netdata streaming API key. The router's
-> netdata scrapes each AP's `prometheus-node-exporter-lua` endpoint
-> (`http://<ap>:9100/metrics`) via its go.d/prometheus collector. Any old
-> `netdata/stream_api_key` file here is unused and can be deleted.
+> Note: AP metrics use no shared secret. The router's VictoriaMetrics scrapes
+> each AP's `prometheus-node-exporter-lua` endpoint (`http://<ap>:9100/metrics`)
+> over the trusted LAN. Any old `netdata/stream_api_key` file here is unused and
+> can be deleted.
 
 ## Rotating
 

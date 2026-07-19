@@ -1,4 +1,6 @@
-PACKAGECONFIG:append = " openssl"
+# openssl: TLS for resolved's DoT. journal-upload: builds systemd-journal-upload
+# (needs curl), which ships the router's own journal to VictoriaLogs.
+PACKAGECONFIG:append = " openssl journal-upload"
 
 # Drop systemd-timesyncd entirely: chrony is our sole NTP client/server, and
 # two NTP clients racing for the system clock causes spurious time jumps.

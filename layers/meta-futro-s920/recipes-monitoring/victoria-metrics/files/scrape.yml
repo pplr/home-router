@@ -1,0 +1,28 @@
+# VictoriaMetrics built-in scrape config (Prometheus format).
+#
+# The AP target IPs mirror the management addresses in repo-root hosts.toml,
+# but are inlined here because bitbake does not parse hosts.toml. Keep them in
+# sync when adding, removing, or re-addressing an AP.
+global:
+  scrape_interval: 30s
+
+scrape_configs:
+  # The router's own host metrics (node_exporter bound to loopback).
+  - job_name: router
+    static_configs:
+      - targets: ['127.0.0.1:9100']
+        labels:
+          instance: home-router
+
+  # OpenWrt APs — prometheus-node-exporter-lua on br-lan :9100.
+  - job_name: aps
+    static_configs:
+      - targets: ['10.0.0.2:9100']
+        labels:
+          instance: ap-ax3600
+      - targets: ['10.0.0.3:9100']
+        labels:
+          instance: ap-r3g
+      - targets: ['10.0.0.4:9100']
+        labels:
+          instance: ap-ax59u

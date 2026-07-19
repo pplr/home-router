@@ -152,8 +152,9 @@ Operational state is bind-mounted from `/data` so it survives A/B updates. They 
 |---|---|
 | `/data/var/log/journal` → `/var/log/journal` | Persistent systemd journal (`Storage=persistent` via journald drop-in) |
 | `/data/var/lib/systemd/network` → `/var/lib/systemd/network` | DHCP server leases for connected LAN clients |
-| `/data/var/cache/netdata` → `/var/cache/netdata` | netdata runtime cache |
-| `/data/var/lib/netdata` → `/var/lib/netdata` | netdata persistent metrics database |
+| `/data/var/lib/systemd/journal-upload` → `/var/lib/systemd/journal-upload` | `systemd-journal-upload` cursor, so an A/B swap resumes shipping to VictoriaLogs instead of re-uploading the retained journal (needs `DynamicUser=no` on the unit — see Monitoring) |
+| `/data/var/lib/victoria-metrics` → `/var/lib/victoria-metrics` | VictoriaMetrics time-series database |
+| `/data/var/lib/victoria-logs` → `/var/lib/victoria-logs` | VictoriaLogs log database |
 | `/data/home/pplr` → `/home/pplr` | `pplr` user's home (shell history, dotfiles); seeded from the rootfs skeleton on first boot |
 
 Source dirs on `/data` are created on first mount by `futro-data-prep.service` (oneshot, ordered between `data.mount` and the bind mounts via `x-systemd.requires=` in fstab). Provided by the `futro-persistent-state` recipe in `recipes-core/futro-persistent-state/`.
@@ -197,7 +198,7 @@ A third, untrusted broadcast domain for IoT devices on VLAN 30. Unlike IPTV (L2 
 - `br-iot` — full L3 bridge, mirror of br-lan: `10.0.30.1/24` + `2a01:e0a:97f:5433::1/64`, `IPMasquerade=ipv4` (NAT44 to WAN), `IPv6SendRA=yes` + `[IPv6Prefix]` (native v6 to WAN), `DHCPServer=yes` (pool `10.0.30.100`–`10.0.30.254`), advertises itself as RDNSS.
 - **No wan0.30 sub-interface and no trunk to wan0** — IoT traffic egresses via routing and SNAT on wan0, not via L2 bridging like IPTV.
 
-**Trust model (firewall):** asymmetric. LAN can freely initiate to IoT (so a LAN laptop can reach a smart-home hub); IoT cannot initiate to LAN — implicitly denied by the `forward` chain's default-drop, with conntrack `established,related` carrying return traffic for LAN-initiated sessions. IoT → router-local services is narrowed to **DHCPv4 (udp/67) + DNS (udp/53 + tcp/53)** only; SSH, netdata, and any future admin port fall through to the input chain's default-drop. IoT → WAN is allowed for both IPv4 (NATted) and IPv6 (native, via the second delegated /64).
+**Trust model (firewall):** asymmetric. LAN can freely initiate to IoT (so a LAN laptop can reach a smart-home hub); IoT cannot initiate to LAN — implicitly denied by the `forward` chain's default-drop, with conntrack `established,related` carrying return traffic for LAN-initiated sessions. IoT → router-local services is narrowed to **DHCPv4 (udp/67) + DNS (udp/53 + tcp/53)** only; SSH, VictoriaMetrics/VictoriaLogs, and any future admin port fall through to the input chain's default-drop. IoT → WAN is allowed for both IPv4 (NATted) and IPv6 (native, via the second delegated /64).
 
 **Hardware prerequisite:** downstream must be VLAN-aware — a managed switch tagging IoT-port frames with VLAN 30, or a VLAN-capable AP with an IoT SSID bound to VLAN 30. A dumb switch delivers IoT frames untagged on lan0/lan1, defeating the isolation.
 
@@ -244,43 +245,59 @@ Stateful inet-family firewall shipped by the `futro-firewall` recipe (`recipes-e
 
 ## Monitoring
 
-netdata runs on the router as the single dashboard (`http://10.0.0.1:19999/`), with its
-metrics DB on `/data` so it survives A/B swaps. Configured by `netdata_%.bbappend`
-(`recipes-webadmin/netdata/`).
+The router is a **collect-and-store** hub, not a dashboard. It runs **VictoriaMetrics** (VM,
+metrics) and **VictoriaLogs** (VL, logs); **Grafana runs on a separate LAN host** (out of
+tree) and queries VM on `:8428` and VL on `:9428`. There is no dashboard served by the router.
+Both stores keep their data on `/data` so it survives A/B swaps. All three router-side pieces
+are prebuilt upstream Go binaries pinned by `sha256`, packaged under
+`recipes-monitoring/{node-exporter,victoria-metrics,victoria-logs}/`.
 
-**AP metrics use pull, not push.** Each OpenWrt AP runs `prometheus-node-exporter-lua` on
-`:9100` (added fleet-wide via `aps/config.toml` `[common.packages].add`; the
-`-wifi_stations` collector adds per-associated-client signal). The exporter binds to the AP's
-`br-lan` address (`listen_interface 'lan'` in the generated
-`/etc/config/prometheus-node-exporter-lua`, written by `apbuild.render`). The router's netdata
-**scrapes** each AP via its `go.d/prometheus` collector — one job per AP in
-`/etc/netdata/go.d/prometheus.conf`, with `prometheus: yes` enabled in `go.d.conf` (both
-emitted by the bbappend). The scrape job IPs mirror the AP management addresses in repo-root
-`hosts.toml` but are inlined in the bbappend (bitbake doesn't parse `hosts.toml`) — keep them
-in sync when adding an AP.
+**Metrics (pull).** VictoriaMetrics scrapes via its built-in vmagent
+(`-promscrape.config=/etc/victoria-metrics/scrape.yml`):
+- the **router's own** host metrics from a local `node_exporter` bound to `127.0.0.1:9100`
+  (`node-exporter` recipe; loopback-only, since it's for the local scrape);
+- each **OpenWrt AP's** `prometheus-node-exporter-lua` on `:9100` (added fleet-wide via
+  `aps/config.toml` `[common.packages].add`; the `-wifi_stations` collector adds
+  per-associated-client signal; binds the AP's `br-lan` address via `listen_interface 'lan'`
+  in the generated `/etc/config/prometheus-node-exporter-lua`, written by `apbuild.render`).
 
-**Each AP is a virtual node, not metrics piled on the router.** Without vnodes every scraped
-series attaches to the router's own node, leaving the three APs indistinguishable in the
-dashboard. So the bbappend ships `/etc/netdata/vnodes/vnodes.conf` with one `hostname`+`guid`
-entry per AP, and each `go.d/prometheus` job carries a `vnode:` line whose value matches a
-vnode `hostname`. netdata then presents each AP as its own node (own menu entry, own host
-labels) even though the router's go.d does the collection. The GUIDs are **fixed in the
-recipe, never generated at build time**: netdata keys a node's metrics DB on `/data` by GUID,
-so a per-build GUID would orphan each AP's history on every RAUC update. When adding an AP,
-mint one fresh `uuidgen` for it and treat it as permanent; never reuse or regenerate an
-existing AP's GUID.
+The AP scrape target IPs mirror the management addresses in repo-root `hosts.toml` but are
+**inlined in `scrape.yml`** (bitbake doesn't parse `hosts.toml`) — keep them in sync when
+adding an AP, and give each target an `instance` label (e.g. `ap-ax3600`) so series are
+attributable per node. (This label replaces netdata's old vnode/GUID scheme — VM keys series
+by label set, so there are no GUIDs to mint or preserve.)
 
-No firewall change is needed: the scrape is router-initiated outbound (`output` policy is
-`accept`, return traffic is `established,related`). netdata itself stays LAN-only reachable
-via the `iifname "br-lan" accept` rule.
+**Logs (push).** VictoriaLogs is the central log store:
+- **APs → VL directly.** OpenWrt `logd` sends RFC3164 syslog over UDP to `10.0.0.1:514`
+  (`aps/config.toml` `[common.syslog]`, unchanged), received by VL's **native syslog listener**
+  (`-syslog.listenAddr.udp=:514`, `-syslog.useLocalTimestamp.udp`). The old rsyslog
+  `syslog-collector` is gone — APs no longer transit the router's journald, so AP logs live in
+  VL only, not in the router's local `journalctl`.
+- **Router → VL** via `systemd-journal-upload` (enabled here through the systemd
+  `journal-upload` PACKAGECONFIG), pointed at VL's native journald endpoint
+  `http://127.0.0.1:9428/insert/journald` by a service drop-in
+  (`journal-upload-router.conf`) shipped from the `victoria-logs` recipe, which also ships the
+  preset that enables the uploader. That same drop-in pins the unit to `DynamicUser=no` so its
+  `StateDirectory` (the upload cursor) sits at the real `/var/lib/systemd/journal-upload` — a
+  `/data` bind mount — instead of DynamicUser's per-boot `/var/lib/private` path; an A/B swap
+  then resumes from the cursor rather than re-uploading the retained journal window. The router
+  keeps a **local persistent journald** on `/data`
+  for on-device `journalctl`, but capped small (`SystemMaxUse=200M`, `MaxRetentionSec=7d` in
+  `journald-persistent.conf`) — VL is the authoritative long-term store. Upload is
+  near-real-time, so the cap never vacuums an entry before it reaches VL.
 
-**Why not the netdata agent on the APs:** OpenWrt's packaged netdata is far behind the
-router's (1.33.1 vs 1.47.5). The old design streamed the stale agent child→parent over a
-shared `stream_api_key` secret; that's gone — node-exporter is current, needs no secret, and
-the pull model keeps one pane of glass. **Why not collectd:** node-exporter-lua is fewer
-packages, a single UCI file, and is the canonical OpenWrt exporter; netdata has no native
-collectd collector anyway (it would still scrape collectd's `write_prometheus` over the same
-go.d/prometheus path).
+**Firewall: no change needed.** Every consumer is on the fully-trusted `br-lan`, already
+covered by `iifname "br-lan" accept`: APs → VL `:514`, Grafana host → VM `:8428` + VL `:9428`,
+and VM → node_exporter is `127.0.0.1`. IoT stays default-drop (no VM/VL access). Retention is a
+tunable (`-retentionPeriod=12` months on both VM and VL units).
+
+**Why prebuilt binaries:** VM/VL/node_exporter are large Go trees; the official static
+linux-amd64 releases are pinned by `sha256` and install via a trivial recipe, avoiding
+multi-minute in-image Go compiles. **Why not netdata:** it coupled collection, storage, and
+dashboard in one agent; splitting into VM+VL with an external Grafana gives one queryable store
+for the whole fleet and keeps the router headless. **Why not the netdata agent on the APs:**
+node-exporter-lua is current, needs no shared secret, is the canonical OpenWrt exporter, and
+the pull model keeps one pane of glass.
 
 ## Barebox Bootloader
 

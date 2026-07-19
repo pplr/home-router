@@ -54,11 +54,11 @@ No new files in `aps/<name>/` to create — the per-AP directory is gone.
 
 - **`[common]`** — `imagebuilder_base`, `timezone`, `zonename`, `country`.
 - **`[common.router]`** — `ipv4`, `ipv6`, `lan_v6_prefix` used to generate the AP's static IP defaults and DNS.
-- **`[common.syslog]`** — Where logd ships logs (the router runs an rsyslog→journald collector).
+- **`[common.syslog]`** — Where logd ships logs (`10.0.0.1:514/udp`, received directly by the router's VictoriaLogs native syslog listener).
 - **`[common.uplink]`** — DSA trunk port name (`wan` on both Xiaomi devices) and IoT VLAN ID.
 - **`[common.packages].add` / `.remove`** — Image Builder `PACKAGES=` shared by every AP (`-foo` removes).
 - **`[common.ssids.<key>]`** — One VAP definition broadcast on every non-disabled radio of every AP. Visible name is `name`; PSK file path is `psk_secret` (resolved under `aps/secrets/`).
-- **`[aps.<name>]`** — Per-AP: `host` (→ `hostname`/`management_ip` from `hosts.toml`), `target`, `profile`, `version`, `sha256`, optional `extra_packages`, and optional `netdata` (bool). `netdata = true` pulls in the `netdata` package and generates `/etc/netdata/stream.conf` so the AP streams its metrics to the router's netdata parent (`10.0.0.1:19999`); requires the shared `netdata/stream_api_key` secret on both the AP and the router. Only enable on APs with RAM/flash headroom (not the r3g).
+- **`[aps.<name>]`** — Per-AP: `host` (→ `hostname`/`management_ip` from `hosts.toml`), `target`, `profile`, `version`, `sha256`, and optional `extra_packages`. Metrics are pull-based: every AP runs `prometheus-node-exporter-lua` on `:9100` (from `[common.packages].add`), scraped by the router's VictoriaMetrics — no per-AP monitoring toggle.
 - **`[[aps.<name>.radios]]`** — Ordered radio array; index becomes `radio0/1/2/...` in the generated `/etc/config/wireless`. Set `disabled = true` to emit a wifi-device entry with `option disabled '1'` and skip its VAPs.
 
 Strict schema: unknown keys raise `ConfigError` (e.g. `[aps.ax3600]: unknown keys: ['frobnicate']`). Typos can't silently no-op.

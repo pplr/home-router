@@ -1,0 +1,33 @@
+[Unit]
+Description=VictoriaLogs single-node log database
+Documentation=https://docs.victoriametrics.com/victorialogs/
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=victoria-logs
+Group=victoria-logs
+ExecStart=/usr/bin/victoria-logs \
+    -storageDataPath=/var/lib/victoria-logs \
+    -httpListenAddr=:9428 \
+    -syslog.listenAddr.udp=:514 \
+    -syslog.useLocalTimestamp.udp \
+    -retentionPeriod=12
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=1048576
+
+# Bind the privileged syslog port (:514) as an unprivileged user.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+
+# Hardening
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/victoria-logs
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target
