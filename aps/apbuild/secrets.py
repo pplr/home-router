@@ -16,7 +16,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .config import CommonConfig, SECRETS_DIR
+from .config import APSpec, CommonConfig, SECRETS_DIR
 
 
 class MissingSecretError(Exception):
@@ -40,7 +40,27 @@ class Secrets:
     authorized_keys: str
     dropbear_ed25519_host_key: bytes
     dropbear_rsa_host_key: bytes
+    # Public half of the router's certificate-push key. Installed into
+    # every AP's authorized_keys behind a forced command, so the router
+    # can deliver a renewed certificate but cannot obtain a shell.
+    ap_push_pubkey: str
     psks: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class APTlsSecrets:
+    """Per-AP TLS material for LuCI HTTPS.
+
+    The private key is generated once on the build host (see
+    ``aps/gen-ap-tls.py``) and baked into this AP's image only — it is
+    never transmitted, and the router only ever sees the CSR. Because a
+    reflash wipes the overlay, the ``bootstrap_cert`` (self-signed,
+    generated alongside the key) keeps LuCI serving HTTPS until the
+    router's next push replaces it with the Let's Encrypt one.
+    """
+
+    key: str
+    bootstrap_cert: str
 
 
 # Relative paths under SECRETS_DIR for secrets that are constant across
@@ -50,6 +70,7 @@ STATIC_SECRET_FILES: dict[str, str] = {
     "authorized_keys": "ssh/authorized_keys",
     "dropbear_ed25519_host_key": "ssh/dropbear_ed25519_host_key",
     "dropbear_rsa_host_key": "ssh/dropbear_rsa_host_key",
+    "ap_push_pubkey": "ssh/ap-push-key.pub",
 }
 
 
@@ -76,7 +97,30 @@ def load_all(common: CommonConfig) -> Secrets:
         dropbear_rsa_host_key=_read_bytes(
             STATIC_SECRET_FILES["dropbear_rsa_host_key"]
         ),
+        ap_push_pubkey=_read_text(STATIC_SECRET_FILES["ap_push_pubkey"]),
         psks=psks,
+    )
+
+
+def load_ap_tls(spec: APSpec) -> APTlsSecrets | None:
+    """Read this AP's baked TLS key + bootstrap certificate.
+
+    Returns ``None`` when the AP is not opted into the certificate flow
+    (no ``ap_cert = true`` on its hosts.toml entry), in which case the
+    image is built without TLS material and LuCI stays on plain HTTP.
+
+    Keyed by ``cert_label`` (the certificate's leftmost DNS label, e.g.
+    ``ax59u``) rather than the AP's config key so the on-disk layout
+    mirrors the issued names.
+    """
+
+    if spec.cert_label is None:
+        return None
+
+    base = f"tls/{spec.cert_label}"
+    return APTlsSecrets(
+        key=_read_text(f"{base}/key.pem", strip=False),
+        bootstrap_cert=_read_text(f"{base}/bootstrap-cert.pem", strip=False),
     )
 
 

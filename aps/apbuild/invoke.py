@@ -13,7 +13,7 @@ from pathlib import Path
 
 from . import fetch, render, stage
 from .config import APSpec, FleetConfig
-from .secrets import load_all
+from .secrets import load_all, load_ap_tls
 
 
 class BuildError(Exception):
@@ -39,6 +39,9 @@ def build_one(name: str, fleet: FleetConfig) -> Path:
 
     print(f"[build] {name}: checking secrets")
     secrets = load_all(fleet.common)
+    tls = load_ap_tls(spec)
+    if tls is None:
+        print(f"[build] {name}: no ap_cert in hosts.toml — building without TLS")
 
     print(f"[build] {name}: ensuring Image Builder {spec.version} for {spec.target}")
     imagebuilder_dir = fetch.ensure(spec, fleet.common)
@@ -47,7 +50,7 @@ def build_one(name: str, fleet: FleetConfig) -> Path:
     stage.merge(spec)
 
     print(f"[build] {name}: rendering generated config + secrets")
-    render.render_all(spec, fleet.common, secrets)
+    render.render_all(spec, fleet.common, secrets, tls)
 
     print(f"[build] {name}: invoking Image Builder")
     out_dir = _run_make_image(spec, imagebuilder_dir, fleet)

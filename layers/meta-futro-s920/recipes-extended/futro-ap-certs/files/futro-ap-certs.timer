@@ -1,0 +1,20 @@
+[Unit]
+Description=Daily Let's Encrypt issue/renew + push for the OpenWrt APs
+Documentation=https://go-acme.github.io/lego/
+
+[Timer]
+# Daily is the conventional ACME cadence: lego only talks to the CA when
+# a certificate is actually inside its renewal window (~1/3 of lifetime
+# remaining), so most runs are a no-op plus one cheap SSH push per AP.
+OnCalendar=daily
+# Spread the load away from the top of the hour — Let's Encrypt asks
+# clients not to synchronise on exact times.
+RandomizedDelaySec=4h
+# Catch up after downtime: the router is not always on, and missing the
+# renewal window entirely would eventually expire the certificates.
+Persistent=true
+# Don't race the network right at boot.
+OnBootSec=15min
+
+[Install]
+WantedBy=timers.target

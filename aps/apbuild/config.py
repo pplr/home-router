@@ -124,6 +124,13 @@ class APSpec:
     management_ip: str
     extra_packages: tuple[str, ...]
     radios: tuple[Radio, ...]
+    # FQDN of the Let's Encrypt certificate this AP serves LuCI on, or
+    # None when its hosts.toml entry doesn't set `ap_cert = true`. The
+    # matching private key is baked from aps/secrets/tls/<cert_label>/
+    # and never leaves the device; the router signs the CSR and pushes
+    # the certificate back (see the futro-ap-certs recipe).
+    cert_fqdn: str | None = None
+    cert_label: str | None = None
 
     # ---- Derived URL / filesystem paths --------------------------------
 
@@ -379,6 +386,12 @@ def _parse_ap(name: str, d: dict, hosts_cfg: HostsConfig) -> APSpec:
         else []
     )
 
+    # Certificate identity is opt-in via `ap_cert = true` on the
+    # hosts.toml entry; when unset the AP is built without TLS material
+    # and LuCI stays on plain HTTP.
+    cert_fqdn = host_entry.cert_fqdn(hosts_cfg.router) if host_entry.ap_cert else None
+    cert_label = host_entry.cert_label if host_entry.ap_cert else None
+
     return APSpec(
         name=name,
         hostname=host_entry.name,
@@ -389,6 +402,8 @@ def _parse_ap(name: str, d: dict, hosts_cfg: HostsConfig) -> APSpec:
         management_ip=str(host_entry.ipv4),
         extra_packages=extra_pkgs,
         radios=radios,
+        cert_fqdn=cert_fqdn,
+        cert_label=cert_label,
     )
 
 

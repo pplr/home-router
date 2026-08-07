@@ -21,4 +21,5 @@ PARTUUID=f7200005-a001-4000-8001-000000000005  /data     ext4  defaults,noatime 
 /data/var/lib/systemd/journal-upload  /var/lib/systemd/journal-upload  none  bind,x-systemd.requires=futro-data-prep.service,nofail  0  0
 /data/var/lib/victoria-metrics  /var/lib/victoria-metrics  none  bind,x-systemd.requires=futro-data-prep.service,nofail  0  0
 /data/var/lib/victoria-logs     /var/lib/victoria-logs     none  bind,x-systemd.requires=futro-data-prep.service,nofail  0  0
+/data/var/lib/lego              /var/lib/lego              none  bind,x-systemd.requires=futro-data-prep.service,nofail  0  0
 /data/home/pplr                 /home/pplr                 none  bind,x-systemd.requires=futro-data-prep.service,nofail  0  0

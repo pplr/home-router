@@ -9,6 +9,7 @@ Produces under <out>/:
     etc/systemd/network/30-br-iot.network.d/10-static-leases.conf
     etc/systemd/resolved.conf.d/local-zone.conf
     etc/hosts
+    etc/futro-ap-certs/aps.list
 """
 
 from __future__ import annotations
@@ -18,7 +19,12 @@ import sys
 from pathlib import Path
 
 from .config import ConfigError, HostsConfig
-from .render import write_etc_hosts, write_network_dropins, write_resolved_dropin
+from .render import (
+    write_ap_cert_list,
+    write_etc_hosts,
+    write_network_dropins,
+    write_resolved_dropin,
+)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -37,6 +43,7 @@ def main(argv: list[str] | None = None) -> int:
     write_network_dropins(cfg, sysconf / "systemd" / "network")
     write_resolved_dropin(cfg, sysconf / "systemd" / "resolved.conf.d")
     write_etc_hosts(cfg, sysconf / "hosts")
+    write_ap_cert_list(cfg, sysconf / "futro-ap-certs" / "aps.list")
     print(f"Wrote {len(cfg.hosts)} hosts under {args.out}/", file=sys.stderr)
     return 0
 

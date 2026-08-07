@@ -41,6 +41,13 @@ class RouterConfig:
     dns_search_domain: str
     dhcp_lan: DhcpRange
     dhcp_iot: DhcpRange
+    # Public DNS zone under which per-AP LuCI certificates are issued
+    # (e.g. "ap.verson.lplr.eu"). Only the ephemeral _acme-challenge TXT
+    # records ever reach the public zone — the A records are local-only,
+    # served from the generated /etc/hosts. Both are None when no host
+    # sets ``ap_cert = true``.
+    ap_cert_domain: str | None = None
+    acme_email: str | None = None
 
 
 @dataclass(frozen=True)
@@ -50,6 +57,11 @@ class Host:
     ``mac`` is optional: hosts without a MAC get only ``/etc/hosts`` +
     DNS entries (no DHCP reservation). Use this for devices that own
     their own static-IP config (e.g. an OpenWrt AP).
+
+    ``ap_cert`` opts the host into the centralised ACME flow: the router
+    issues a Let's Encrypt certificate for ``<cert_label>.<ap_cert_domain>``
+    from a CSR baked into the device's own image, then pushes the signed
+    certificate back. The private key never leaves the device.
     """
 
     name: str
@@ -57,6 +69,26 @@ class Host:
     vlan: str  # "lan" | "iot"
     mac: str | None = None
     aliases: tuple[str, ...] = ()
+    ap_cert: bool = False
+
+    @property
+    def cert_label(self) -> str:
+        """Leftmost label of this host's certificate FQDN.
+
+        Prefers the first alias (``ax59u``) over the full host name
+        (``ap-ax59u``) so the issued name reads ``ax59u.ap.verson.lplr.eu``
+        rather than stuttering ``ap-ax59u.ap.…``.
+        """
+
+        return self.aliases[0] if self.aliases else self.name
+
+    def cert_fqdn(self, router: RouterConfig) -> str:
+        if router.ap_cert_domain is None:
+            raise ConfigError(
+                f"host {self.name!r} sets ap_cert = true but"
+                " [router].ap_cert_domain is not configured"
+            )
+        return f"{self.cert_label}.{router.ap_cert_domain}"
 
 
 @dataclass(frozen=True)
@@ -87,6 +119,11 @@ class HostsConfig:
     def hosts_by_vlan(self, vlan: str) -> tuple[Host, ...]:
         return tuple(h for h in self.hosts if h.vlan == vlan)
 
+    def ap_cert_hosts(self) -> tuple[Host, ...]:
+        """Hosts opted into the centralised ACME certificate flow."""
+
+        return tuple(h for h in self.hosts if h.ap_cert)
+
     def host_by_name(self, name: str) -> Host:
         for h in self.hosts:
             if h.name == name:
@@ -99,6 +136,10 @@ class HostsConfig:
 
 _MAC_RE = re.compile(r"^[0-9a-f]{2}(?::[0-9a-f]{2}){5}$")
 _NAME_RE = re.compile(r"^[a-z][a-z0-9-]*$")
+# Multi-label DNS name (at least two labels), lowercase, no trailing dot.
+_DOMAIN_RE = re.compile(
+    r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$"
+)
 _VLANS = frozenset({"lan", "iot"})
 
 
@@ -108,7 +149,7 @@ def _parse_router(d: dict) -> RouterConfig:
         d,
         {
             "lan_subnet", "lan_ipv4", "iot_subnet", "iot_ipv4",
-            "dns_search_domain", "dhcp",
+            "dns_search_domain", "dhcp", "ap_cert_domain", "acme_email",
         },
         section,
     )
@@ -128,9 +169,34 @@ def _parse_router(d: dict) -> RouterConfig:
             " (lowercase letters/digits/hyphen, starting with a letter)"
         )
 
+    # ACME/AP-certificate settings. Both are optional as a pair: omit
+    # them entirely when no host sets `ap_cert = true`.
+    ap_cert_domain: str | None = None
+    if "ap_cert_domain" in d:
+        ap_cert_domain = _req_str(d, "ap_cert_domain", section)
+        if not _DOMAIN_RE.match(ap_cert_domain):
+            raise ConfigError(
+                f"{section}.ap_cert_domain {ap_cert_domain!r} must be a"
+                " lowercase multi-label DNS name (e.g. ap.verson.example.eu)"
+            )
+    acme_email: str | None = None
+    if "acme_email" in d:
+        acme_email = _req_str(d, "acme_email", section)
+        if "@" not in acme_email or acme_email.startswith("@") or acme_email.endswith("@"):
+            raise ConfigError(
+                f"{section}.acme_email {acme_email!r} is not a valid email address"
+            )
+    if (ap_cert_domain is None) != (acme_email is None):
+        raise ConfigError(
+            f"{section}: ap_cert_domain and acme_email must be set together"
+            " (ACME registration needs a contact address)"
+        )
+
     dhcp = _require_section(d, "dhcp", section)
     _check_keys(dhcp, {"lan", "iot"}, f"{section}.dhcp")
     return RouterConfig(
+        ap_cert_domain=ap_cert_domain,
+        acme_email=acme_email,
         lan_subnet=lan_subnet,
         lan_ipv4=lan_ipv4,
         iot_subnet=iot_subnet,
@@ -168,7 +234,7 @@ def _parse_host(index: int, d: object, router: RouterConfig) -> Host:
     section = f"[[hosts]] (index {index})"
     if not isinstance(d, dict):
         raise ConfigError(f"{section} must be a table")
-    _check_keys(d, {"name", "ipv4", "vlan", "mac", "aliases"}, section)
+    _check_keys(d, {"name", "ipv4", "vlan", "mac", "aliases", "ap_cert"}, section)
 
     name = _req_str(d, "name", section)
     if not _NAME_RE.match(name):
@@ -217,7 +283,31 @@ def _parse_host(index: int, d: object, router: RouterConfig) -> Host:
                 )
         aliases = tuple(raw)
 
-    return Host(name=name, ipv4=ipv4, vlan=vlan, mac=mac, aliases=aliases)
+    ap_cert = False
+    if "ap_cert" in d:
+        v = d["ap_cert"]
+        if not isinstance(v, bool):
+            raise ConfigError(
+                f"{section}.ap_cert must be bool, got {type(v).__name__}"
+            )
+        ap_cert = v
+    if ap_cert:
+        # The router reaches the AP over SSH to push the certificate and
+        # LuCI is an admin surface — both belong on the trusted bridge.
+        if vlan != "lan":
+            raise ConfigError(
+                f"{section}: ap_cert = true requires vlan = 'lan'"
+                f" (got {vlan!r}); the ACME push path runs over the trusted bridge"
+            )
+        if router.ap_cert_domain is None:
+            raise ConfigError(
+                f"{section}: ap_cert = true requires [router].ap_cert_domain"
+                " (and acme_email) to be set"
+            )
+
+    return Host(
+        name=name, ipv4=ipv4, vlan=vlan, mac=mac, aliases=aliases, ap_cert=ap_cert
+    )
 
 
 def _check_uniqueness(hosts: tuple[Host, ...]) -> None:

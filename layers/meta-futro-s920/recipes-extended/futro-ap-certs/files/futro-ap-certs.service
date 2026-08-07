@@ -1,0 +1,33 @@
+[Unit]
+Description=Issue and push Let's Encrypt certificates to the OpenWrt APs
+Documentation=https://go-acme.github.io/lego/
+# Needs outbound DNS/HTTPS (OVH API + Let's Encrypt) and the LAN bridge
+# to reach the APs. RequiresMountsFor pulls in (and orders after) the
+# /data-backed bind mount holding lego's account + certificate store.
+After=network-online.target nss-lookup.target
+Wants=network-online.target
+RequiresMountsFor=/var/lib/lego
+
+# No [Install] section on purpose: this unit is activated by
+# futro-ap-certs.timer, never wanted by a target directly. Run it by hand
+# with `systemctl start futro-ap-certs.service` to force a cycle.
+
+[Service]
+Type=oneshot
+# OVH API credentials — root-only, shipped from the out-of-tree secrets
+# dir. Deliberately not `-` prefixed: without it every run would fail in
+# a confusing way inside lego's provider setup instead of here.
+EnvironmentFile=/etc/futro-ap-certs/ovh.env
+Environment=ACME_EMAIL=@ACME_EMAIL@
+ExecStart=/usr/libexec/futro-ap-certs.sh
+
+# Hardening. Runs as root: it reads the SSH push key and the OVH
+# credentials (both 0600 root-owned) and writes lego's store.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/lego
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes

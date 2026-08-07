@@ -141,6 +141,8 @@ Secrets baked into the image (password hash, SSH host keys, machine-id) live und
 | `pplr.hash` | `core-image-minimal.bbappend` (extrausers) | `mkpasswd -m sha512crypt -R 500000` |
 | `machine-id` | `base-files_%.bbappend` | `python3 -c "import uuid; print(uuid.uuid4().hex)"` |
 | `ssh/ssh_host_{ed25519,rsa}_key{,.pub}` | `openssh_%.bbappend` | `ssh-keygen -t {ed25519,rsa} -N '' -f ...` |
+| `ovh.env` | `futro-ap-certs` | Hand-written; OVH API app + zone-scoped consumer key |
+| `ssh/ap-push-key` | `futro-ap-certs` | `ssh-keygen -t ed25519 -N '' -f ...` (public half → `aps/secrets/`) |
 
 To rotate any secret: regenerate the file, rebuild, deploy via RAUC. Hostname (`home-router`) is *not* a secret and is committed at `recipes-core/base-files/base-files/hostname`.
 
@@ -155,6 +157,7 @@ Operational state is bind-mounted from `/data` so it survives A/B updates. They 
 | `/data/var/lib/systemd/journal-upload` → `/var/lib/systemd/journal-upload` | `systemd-journal-upload` cursor, so an A/B swap resumes shipping to VictoriaLogs instead of re-uploading the retained journal (needs `DynamicUser=no` on the unit — see Monitoring) |
 | `/data/var/lib/victoria-metrics` → `/var/lib/victoria-metrics` | VictoriaMetrics time-series database |
 | `/data/var/lib/victoria-logs` → `/var/lib/victoria-logs` | VictoriaLogs log database |
+| `/data/var/lib/lego` → `/var/lib/lego` | ACME account key + issued AP certificates (see TLS Certificates for the APs) |
 | `/data/home/pplr` → `/home/pplr` | `pplr` user's home (shell history, dotfiles); seeded from the rootfs skeleton on first boot |
 
 Source dirs on `/data` are created on first mount by `futro-data-prep.service` (oneshot, ordered between `data.mount` and the bind mounts via `x-systemd.requires=` in fstab). Provided by the `futro-persistent-state` recipe in `recipes-core/futro-persistent-state/`.
@@ -298,6 +301,117 @@ dashboard in one agent; splitting into VM+VL with an external Grafana gives one 
 for the whole fleet and keeps the router headless. **Why not the netdata agent on the APs:**
 node-exporter-lua is current, needs no shared secret, is the canonical OpenWrt exporter, and
 the pull model keeps one pane of glass.
+
+## TLS Certificates for the APs (ACME / DNS-01)
+
+Each OpenWrt AP serves LuCI over HTTPS on `https://<label>.ap.verson.lplr.eu`
+(e.g. `ax59u.ap.verson.lplr.eu`) with a real Let's Encrypt certificate. Issuance
+is **centralised on the router**; the **private key never leaves the AP**.
+
+**Why centralised:** the APs are on RFC1918 addresses with no inbound path from
+the internet, so HTTP-01 and TLS-ALPN-01 are impossible — only **DNS-01** works.
+DNS-01 needs credentials that can write the whole `lplr.eu` zone, and those
+should exist in exactly one place, so the router is the only device holding
+them. Per-AP certificates (not one wildcard) keep the blast radius of any single
+device to itself.
+
+**How the key stays on the AP:** `aps/gen-ap-tls.py` generates a P-256 key + CSR
++ self-signed bootstrap cert per AP into `aps/secrets/tls/<label>/` (gitignored).
+The key is baked into that AP's squashfs only. The router's image bakes just the
+**CSR**, and lego is driven in `--csr` mode — so the router signs an identity it
+can never impersonate. Certificates and CSRs are public; nothing secret crosses
+the wire in either direction.
+
+| Piece | Where | Purpose |
+|---|---|---|
+| `aps/gen-ap-tls.py` | build host | Generates key + CSR + bootstrap cert per AP |
+| `aps/secrets/tls/<label>/key.pem` | baked → AP `/etc/uhttpd/ap.key` | Private key, one AP only |
+| `aps/secrets/tls/<label>/csr.pem` | baked → router `/etc/futro-ap-certs/csr/<host>.csr` | What lego signs |
+| `recipes-support/lego` | router | Prebuilt lego 5.3.1, pinned by sha256 |
+| `recipes-extended/futro-ap-certs` | router | Issue-and-push script + daily timer; also generates `/etc/ssh/ssh_known_hosts` |
+| `aps/common/files/usr/libexec/accept-ap-cert.sh` | AP | Forced command that receives a cert |
+
+**Flow (daily, `futro-ap-certs.timer`):** for each line of the generated
+`/etc/futro-ap-certs/aps.list`, run `lego … --dns ovh run --csr <ap>.csr` (v5's
+`run` is unified — it obtains when no resource exists and renews when one does,
+using a dynamic ~1/3-of-lifetime window), then pipe the resulting `.crt` over
+SSH to the AP. State lives in `/var/lib/lego`, a `/data` bind mount, so an A/B
+swap doesn't re-issue everything.
+
+**Push channel:** the router's `ap-push-key` appears in every AP's
+`authorized_keys` behind
+`command="/usr/libexec/accept-ap-cert.sh",no-pty,no-port-forwarding,…` — dropbear
+discards whatever the client asks to run, so that key cannot get a shell. The
+router pins each AP's host key with `StrictHostKeyChecking=yes` against the
+**system-wide** `/etc/ssh/ssh_known_hosts` (see below); the whole fleet shares
+one baked dropbear host key pair, so every AP is pinned to the same key material.
+
+**Host-key pinning uses the global known_hosts, not a private file.**
+`futro-ap-certs` generates `/etc/ssh/ssh_known_hosts`, which is openssh's default
+`GlobalKnownHostsFile` — so no `ssh_config` change is needed, and interactive
+`ssh ax59u` from the router gets host-key verification for free instead of a TOFU
+prompt. Each entry lists every name the AP answers to (bare name, `.lan` FQDN,
+aliases, certificate FQDN, address), since a known_hosts lookup keys on whatever
+string was typed. The push additionally passes `UserKnownHostsFile=/dev/null` so
+the system-wide database is the *only* source of truth: no TOFU accumulation, and
+no dependence on root's `~/.ssh`, which the unit's `ProtectHome=yes` hides anyway.
+
+Note this is a *different recipe* from openssh, so the "files added to `/etc/ssh/`
+land in the wrong package" trap documented under Configuration Pitfalls does
+**not** apply — `FILES` splitting is per-recipe, and `futro-ap-certs` claims
+`${sysconfdir}/ssh/ssh_known_hosts` in its own `FILES:${PN}`. OE-core's openssh
+ships no `ssh_known_hosts` and has no mechanism for adding one.
+
+**DNS:** the `A` records are **local-only** — `write_etc_hosts` appends the cert
+FQDN to each flagged host's `/etc/hosts` line, and resolved serves it to LAN
+clients. The public OVH zone only ever holds the ephemeral `_acme-challenge` TXT
+records lego creates and deletes. The `10.0.0.0/24` topology is never published.
+
+**Firewall: no change needed.** lego (router→OVH/LE) and the push (router→AP:22
+on the trusted `br-lan`) are both router-originated, and `output` is
+default-accept. Nothing new listens on the router.
+
+### AP Certificate Pitfalls
+
+**The push is unconditional, and that's deliberate:** `sysupgrade -n` wipes the
+overlay and reverts the AP to its baked *bootstrap* (self-signed) cert. If the
+router only pushed after a renewal, a freshly-reflashed AP would sit on the
+self-signed cert until the next renewal window — up to ~60 days. So the script
+pushes on every tick and the AP-side receiver is idempotent (`cmp` first, restart
+uhttpd only on an actual change). Cost is one cheap SSH round-trip per AP per
+day; benefit is that a reflash self-heals within 24h.
+
+**Baked key ⇒ the key is reused across renewals.** Rotating on every renewal
+(the modern ACME default) is impossible here without on-device key generation,
+which `sysupgrade -n` would defeat. The key rotates when you regenerate +
+rebuild + reflash instead. Acceptable for a LAN-only admin surface with no
+certificate pinning; if you do rotate, you must **delete lego's stored
+certificate** (`/var/lib/lego/certificates/<fqdn>.*`) or it will try to *renew*
+the old cert — which no longer matches the new key — instead of issuing fresh.
+
+**LuCI must be added explicitly, and `uhttpd` must be bound, not firewalled:**
+LuCI is in no device's default package set, so `luci-ssl` is added in
+`aps/config.toml` (it pulls `luci-light` + the mbedtls TLS backend, matching the
+fleet's existing mbedtls choice). Critically, **the APs run no firewall** —
+`firewall4` is in `[common.packages].remove` — so the *listen address* is the
+only isolation mechanism. The generated `/etc/config/uhttpd` binds
+`listen_http`/`listen_https` to the AP's management IP, never `0.0.0.0`, which is
+what keeps LuCI off the untrusted IoT bridge. Same posture as
+`prometheus-node-exporter-lua`'s `listen_interface 'lan'`. Binding `0.0.0.0`
+would silently expose LuCI to every IoT device.
+
+**`accept-ap-cert.sh` validates structurally, not cryptographically:** there is
+no `openssl` on the AP (luci-ssl uses mbedtls), so the receiver checks for a
+well-formed PEM rather than verifying the cert against the key. That's
+sufficient — the cert is signed for a CSR generated from *that AP's* public key,
+so a mismatch is a build-time impossibility, not a runtime risk. The receiver
+does guard the genuinely dangerous case: it keeps the old cert and **rolls back**
+if uhttpd fails to come up, since a bad cert would otherwise leave LuCI
+unreachable exactly when you need it to fix things.
+
+**`ap_cert` is opt-in and degrades cleanly:** an AP whose `hosts.toml` entry
+omits `ap_cert = true` builds with no TLS material, no push key in
+`authorized_keys`, and a plain-HTTP uhttpd. Nothing fails.
 
 ## Barebox Bootloader
 

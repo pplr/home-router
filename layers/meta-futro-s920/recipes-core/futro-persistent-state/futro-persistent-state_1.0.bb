@@ -1,6 +1,7 @@
 SUMMARY = "Persistent runtime state on /data for the Futro S920 router"
 DESCRIPTION = " \
-    Bridges operational state (DHCP server leases, systemd journal) into the \
+    Bridges operational state (DHCP server leases, systemd journal, metrics \
+    and log stores, the ACME account + issued AP certificates) into the \
     /data partition so it survives RAUC A/B updates. Ships a oneshot unit \
     that creates the bind-mount source dirs after /data is mounted, plus a \
     journald drop-in enabling persistent storage. The actual bind mounts are \
