@@ -11,6 +11,7 @@ are baked verbatim from secrets/.
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 from .config import APSpec, CommonConfig, Radio, Ssid
 from .secrets import APTlsSecrets, Secrets
@@ -251,6 +252,26 @@ def _new_root_shadow_line(password_hash: str) -> str:
     return f"root:{password_hash}:0:0:99999:7:::"
 
 
+# ---- /etc/dropbear ----------------------------------------------------
+
+
+def _dropbear_dir(spec: APSpec) -> Path:
+    """Return the staged /etc/dropbear, created 0700.
+
+    The explicit chmod matters: mkdir() honours the build host's umask
+    (0002 here -> 0775), Image Builder's `cp -fpR` carries that mode into
+    the image, and dropbear's checkfileperm() refuses an authorized_keys
+    whose directory is group- or other-writable. The failure is silent —
+    pubkey auth is simply rejected, taking the router's certificate push
+    with it.
+    """
+
+    path = spec.staged_files_dir / "etc" / "dropbear"
+    path.mkdir(parents=True, exist_ok=True)
+    os.chmod(path, 0o700)
+    return path
+
+
 # ---- /etc/dropbear/authorized_keys ------------------------------------
 
 
@@ -281,8 +302,7 @@ def _install_authorized_keys(
             f"{secrets.ap_push_pubkey.strip()}\n"
         )
 
-    out_path = spec.staged_files_dir / "etc" / "dropbear" / "authorized_keys"
-    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path = _dropbear_dir(spec) / "authorized_keys"
     out_path.write_text(content, encoding="utf-8")
     os.chmod(out_path, 0o600)
 
@@ -298,8 +318,7 @@ def _install_dropbear_host_keys(spec: APSpec, secrets: Secrets) -> None:
     sshdgenkeys (see CLAUDE.md, "Bake *all* host key types").
     """
 
-    dropbear_dir = spec.staged_files_dir / "etc" / "dropbear"
-    dropbear_dir.mkdir(parents=True, exist_ok=True)
+    dropbear_dir = _dropbear_dir(spec)
     for name, blob in (
         ("dropbear_ed25519_host_key", secrets.dropbear_ed25519_host_key),
         ("dropbear_rsa_host_key", secrets.dropbear_rsa_host_key),

@@ -332,7 +332,8 @@ the wire in either direction.
 | `aps/common/files/usr/libexec/accept-ap-cert.sh` | AP | Forced command that receives a cert |
 
 **Flow (daily, `futro-ap-certs.timer`):** for each line of the generated
-`/etc/futro-ap-certs/aps.list`, run `lego … --dns ovh run --csr <ap>.csr` (v5's
+`/etc/futro-ap-certs/aps.list`, run
+`lego run --accept-tos --email … --path … --dns ovh --csr <ap>.csr` (v5's
 `run` is unified — it obtains when no resource exists and renews when one does,
 using a dynamic ~1/3-of-lifetime window), then pipe the resulting `.crt` over
 SSH to the AP. State lives in `/var/lib/lego`, a `/data` bind mount, so an A/B
@@ -372,6 +373,31 @@ on the trusted `br-lan`) are both router-originated, and `output` is
 default-accept. Nothing new listens on the router.
 
 ### AP Certificate Pitfalls
+
+**In lego v5 every issuance flag belongs to `run`, not to `lego`:** `lego --help`
+lists exactly five global options — `--help`, `--version`, `--log.format`,
+`--log.level`, `--config`. `--accept-tos`, `--email`, `--path`, `--dns` and
+`--csr` are *all* `run` flags (`lego run --help`). This differs from the shape
+most v4-era examples use, where the first four sit before the subcommand. A
+misplaced flag is **not** silently ignored: urfave/cli rejects it during argument
+parsing, so `futro-ap-certs.service` fails on every AP before touching the CA and
+no certificate is ever issued or renewed. Verify a change to the invocation
+against the pinned binary rather than from memory — `lego run --help` on the
+tarball in `downloads/` is authoritative and needs no device.
+
+**`/etc/dropbear` on the APs must be 0700, and a bare `mkdir()` won't give you
+that:** `apbuild.render` stages the directory on the build host, so a plain
+`Path.mkdir()` inherits the *builder's* umask (0002 → 0775), and Image Builder's
+`cp -fpR` propagates that mode onto the target rootfs — including onto the
+directory OpenWrt already ships, since `cp -p` applies the source mode to an
+existing destination too. Dropbear's `checkfileperm()` then refuses an
+`authorized_keys` whose directory is group- or other-writable, and the failure is
+silent: pubkey auth is simply rejected, which kills the router's certificate push
+and every other key-based SSH into the AP. `render._dropbear_dir()` centralises
+the `mkdir` + explicit `chmod 0o700` for both the host keys and
+`authorized_keys`; use it rather than re-creating the path inline. Note that the
+other staged directories are still umask-dependent — only `/etc/dropbear` is
+pinned, because it's the only one whose mode is load-bearing.
 
 **The push is unconditional, and that's deliberate:** `sysupgrade -n` wipes the
 overlay and reverts the AP to its baked *bootstrap* (self-signed) cert. If the

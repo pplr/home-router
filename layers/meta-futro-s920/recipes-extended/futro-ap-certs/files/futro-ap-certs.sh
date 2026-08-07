@@ -67,14 +67,18 @@ issue() {
         return 1
     fi
 
+    # Every flag below belongs to the `run` subcommand — in lego v5 the
+    # only *global* options are --log.*/--config, so a flag placed before
+    # `run` is a parse error, not a tolerated alternative spelling.
+    #
     # stdin is the aps.list being consumed by the loop below — keep lego
     # away from it so a stray read can't swallow the remaining APs.
-    lego \
+    lego run \
         --accept-tos \
         --email "$ACME_EMAIL" \
         --path "$LEGO_PATH" \
         --dns ovh \
-        run --csr "$csr" < /dev/null
+        --csr "$csr" < /dev/null
 }
 
 # The certificate is public material, so the channel only needs
