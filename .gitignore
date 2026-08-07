@@ -6,6 +6,7 @@ build/cache
 build/tmp
 build/*.sock
 build/*.log
+build/bitbake.lock
 
 # Out-of-tree secrets baked into the image at build time.
 # README.md is the only file in this directory that's tracked.
@@ -17,5 +18,8 @@ aps/downloads/
 aps/build/
 aps/secrets/*
 !aps/secrets/README.md
-aps/**/__pycache__/
-routerbuild/**/__pycache__/
+
+# Python bytecode, anywhere — the build drivers (aps/apbuild, routerbuild)
+# and the wic plugins under layers/ all get imported and leave caches behind.
+__pycache__/
+*.py[cod]
