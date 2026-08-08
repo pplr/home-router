@@ -25,7 +25,7 @@ IMAGE_INSTALL:append = " \
     psmisc \
     kmod \
     ncurses-tools \
-    vim-tiny \
+    vim \
     bind-utils \
     which \
     unzip \
