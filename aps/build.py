@@ -40,7 +40,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     ap_names = sorted(fleet.aps)
     parser = argparse.ArgumentParser(
         description="Build OpenWrt sysupgrade images for the home APs.",
-        epilog=f"Discovered APs (from aps/config.toml): {', '.join(ap_names)}",
+        epilog=f"Discovered APs (from config.toml): {', '.join(ap_names)}",
     )
     parser.add_argument(
         "ap",

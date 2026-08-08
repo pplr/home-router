@@ -132,6 +132,47 @@ Consequences for maintenance:
 
 All device configuration is managed statically in this repo and baked into the image at build time — there is no on-device configuration. Anything mutable in the rootfs would be wiped on the next RAUC slot swap, so the model is: configuration is static-from-recipe; operational state lives on `/data`.
 
+### The declarative network config: repo-root `config.toml`
+
+One file describes the whole home network — router, wired devices, and the OpenWrt
+AP fleet. It replaced the earlier split of `hosts.toml` + `aps/config.toml`, which
+declared each AP twice (identity in one, build spec in the other) joined by a `host =`
+cross-reference, and overloaded `ap_cert = true` as the only marker for "this is an AP".
+
+| Section | Owns |
+|---|---|
+| `[router]` | subnets, DHCP pools, `dns_search_domain`, `lan_v6_prefix` |
+| `[acme]` | `domain` + `email` for the APs' LuCI certificates |
+| `[[hosts]]` | **non-AP** devices only (NAS, …); `mac` is what earns a DHCP reservation |
+| `[aps]` | fleet-wide AP settings (imagebuilder, timezone, packages, `[[aps.ssids]]`) |
+| `[aps.<label>]` | one AP: identity **and** build spec, declared exactly once |
+
+**Two rules make the `[aps]` split unambiguous.** First, *any key under `[aps]` whose
+value is a table is an access point*; scalars and arrays are fleet settings. That is
+why the fleet settings are flat (`syslog_port`, `trunk_port_alias`, `packages_add`, …)
+and SSIDs are an **array**-of-tables — a nested `[aps.syslog]` would be
+indistinguishable from an AP labelled `syslog`. Second, *the table key is the AP's
+`label`*: it is the short `/etc/hosts` alias, the leftmost label of the certificate
+FQDN, the secrets directory (`aps/secrets/{tls,ssh}/<label>/`), and the
+`./aps/build.py <label>` argument.
+
+**Two consumers, one file.** `routerbuild/` (imported by three recipes) parses
+`[router]`, `[acme]`, `[[hosts]]` and the AP *identity* slice; `aps/apbuild/` parses
+the AP *build* slice. The split runs that way because `apbuild` imports `routerbuild`,
+so `routerbuild` must not import back. `routerbuild`'s per-AP key check still
+allow-lists the build-spec keys, so a typo like `profil =` fails there too rather than
+being silently ignored. Neither consumer could ever load a subset of the config — the
+router needs the AP list for DNS and certificates, and the AP build needs `[router]`
+to validate addresses — which is why merging cost nothing.
+
+**Derived, not repeated.** The APs' gateway, DNS, NTP server and syslog target are all
+the router's LAN address, so they are taken from `[router].lan_ipv4` instead of being
+re-declared under `[aps]`. Uniqueness (names, aliases, addresses) is enforced across
+`[[hosts]]` **and** `[aps.*]` together, since both land in the same `/etc/hosts`.
+
+The bitbake variable is `CONFIG_TOML` (see `conf/layer.conf`); every consuming recipe
+lists it in `do_install[file-checksums]` so an edit retriggers `do_install`.
+
 ### Out-of-tree secrets
 
 Secrets baked into the image (password hash, SSH host keys, machine-id) live under `layers/meta-futro-s920/files/secrets/` which is **gitignored** (only `README.md` is tracked). Recipes read these at parse / `do_install` time via the `SECRETS_DIR` variable defined in `meta-futro-s920/conf/layer.conf`. Missing files trigger `bb.fatal` with the expected path — see `files/secrets/README.md` for generation commands.
@@ -260,19 +301,19 @@ are prebuilt upstream Go binaries pinned by `sha256`, packaged under
 - the **router's own** host metrics from a local `node_exporter` bound to `127.0.0.1:9100`
   (`node-exporter` recipe; loopback-only, since it's for the local scrape);
 - each **OpenWrt AP's** `prometheus-node-exporter-lua` on `:9100` (added fleet-wide via
-  `aps/config.toml` `[common.packages].add`; the `-wifi_stations` collector adds
+  the root `config.toml` `[aps].packages_add`; the `-wifi_stations` collector adds
   per-associated-client signal; binds the AP's `br-lan` address via `listen_interface 'lan'`
   in the generated `/etc/config/prometheus-node-exporter-lua`, written by `apbuild.render`).
 
-The AP scrape target IPs mirror the management addresses in repo-root `hosts.toml` but are
-**inlined in `scrape.yml`** (bitbake doesn't parse `hosts.toml`) — keep them in sync when
+The AP scrape target IPs mirror the addresses in repo-root `config.toml` but are
+**inlined in `scrape.yml`** (that recipe doesn't parse `config.toml`) — keep them in sync when
 adding an AP, and give each target an `instance` label (e.g. `ap-ax3600`) so series are
 attributable per node. (This label replaces netdata's old vnode/GUID scheme — VM keys series
 by label set, so there are no GUIDs to mint or preserve.)
 
 **Logs (push).** VictoriaLogs is the central log store:
 - **APs → VL directly.** OpenWrt `logd` sends RFC3164 syslog over UDP to `10.0.0.1:514`
-  (`aps/config.toml` `[common.syslog]`, unchanged), received by VL's **native syslog listener**
+  (`config.toml` `[aps].syslog_*` + the router's own LAN address), received by VL's **native syslog listener**
   (`-syslog.listenAddr.udp=:514`, `-syslog.useLocalTimestamp.udp`). The old rsyslog
   `syslog-collector` is gone — APs no longer transit the router's journald, so AP logs live in
   VL only, not in the router's local `journalctl`.
@@ -417,9 +458,9 @@ the old cert — which no longer matches the new key — instead of issuing fres
 
 **LuCI must be added explicitly, and `uhttpd` must be bound, not firewalled:**
 LuCI is in no device's default package set, so `luci-ssl` is added in
-`aps/config.toml` (it pulls `luci-light` + the mbedtls TLS backend, matching the
-fleet's existing mbedtls choice). Critically, **the APs run no firewall** —
-`firewall4` is in `[common.packages].remove` — so the *listen address* is the
+`config.toml` `[aps].packages_add` (it pulls `luci-light` + the mbedtls TLS backend,
+matching the fleet's existing mbedtls choice). Critically, **the APs run no firewall**
+— `firewall4` is in `packages_remove` — so the *listen address* is the
 only isolation mechanism. The generated `/etc/config/uhttpd` binds
 `listen_http`/`listen_https` to the AP's management IP, never `0.0.0.0`, which is
 what keeps LuCI off the untrusted IoT bridge. Same posture as
@@ -435,8 +476,8 @@ does guard the genuinely dangerous case: it keeps the old cert and **rolls back*
 if uhttpd fails to come up, since a bad cert would otherwise leave LuCI
 unreachable exactly when you need it to fix things.
 
-**`ap_cert` is opt-in and degrades cleanly:** an AP whose `hosts.toml` entry
-omits `ap_cert = true` builds with no TLS material, no push key in
+**`cert` is opt-in and degrades cleanly:** an AP whose `[aps.<label>]` table
+omits `cert = true` builds with no TLS material, no push key in
 `authorized_keys`, and a plain-HTTP uhttpd. Nothing fails.
 
 ## Barebox Bootloader

@@ -1,0 +1,272 @@
+# Single source of truth for the whole home network — router, wired
+# devices, and the OpenWrt access-point fleet.
+#
+# Consumed at build time by:
+#   - routerbuild/  (this repo) → static-lease drop-ins, /etc/hosts, the
+#                   systemd-resolved drop-in, and the AP certificate
+#                   manifest baked into the Futro S920 image.
+#   - aps/apbuild/  (this repo) → each [aps.<label>] drives one OpenWrt
+#                   sysupgrade image: its UCI config and its Image
+#                   Builder invocation.
+#
+# Both consumers read this one file, which is why it is one file: the
+# router needs the AP list (for DNS and certificates) and the AP build
+# needs [router] (to validate addresses), so neither could ever load a
+# subset.
+#
+# ---- structure --------------------------------------------------------
+#
+#   [router]        subnets, DHCP pools, search domain
+#   [acme]          domain + contact for the APs' LuCI certificates
+#   [[hosts]]       non-AP devices (NAS, …)
+#   [aps]           settings shared by every AP
+#   [aps.<label>]   one table per AP: identity *and* build spec
+#
+# IMPORTANT: under [aps], any key whose value is a *table* is an access
+# point; scalars and arrays are fleet-wide settings. That is why the
+# shared settings below are flat and `ssids` is an array-of-tables — a
+# nested [aps.syslog] table would be indistinguishable from an AP
+# labelled "syslog".
+#
+# ---- adding a device --------------------------------------------------
+#
+#   Ordinary device → append a [[hosts]] block, rebuild + RAUC-update the
+#   router. `mac` is optional:
+#     - WITH mac  → the DHCP server emits a [DHCPServerStaticLease] so
+#                   the device always gets the declared IPv4.
+#     - WITHOUT   → /etc/hosts + DNS only; the device configures its own
+#                   static IP.
+#
+#   Access point → append an [aps.<label>] table (see the existing ones
+#   for the fields), then `./aps/build.py <label>`. No [[hosts]] entry:
+#   APs are declared once, here.
+
+[router]
+# Subnets used to validate that every address below falls inside the
+# right VLAN. Keep in sync with the addresses on br-lan and br-iot in
+# layers/meta-futro-s920/recipes-core/network/files/30-br-{lan,iot}.network.
+lan_subnet = "10.0.0.0/24"
+lan_ipv4   = "10.0.0.1"
+iot_subnet = "10.0.30.0/24"
+iot_ipv4   = "10.0.30.1"
+
+# The /64 delegated to br-lan by the Freebox. The APs pick up a GUA from
+# the router's RA on this prefix; it appears in their generated
+# /etc/config/network for documentation.
+lan_v6_prefix = "2a01:e0a:97f:5432::/64"
+
+# DHCP search domain pushed to clients (DHCPv4 option 15 via networkd's
+# `[DHCPServer] Domains=`). Devices become `<name>.<dns_search_domain>`
+# in /etc/hosts so `ssh ax3600` completes to `ax3600.lan`.
+dns_search_domain = "lan"
+
+[router.dhcp.lan]
+# Dynamic pool. Static-lease IPs must fall OUTSIDE [offset .. offset+size-1]
+# so the DHCP server can't hand them out to a different MAC.
+pool_offset = 100
+pool_size   = 155
+lease_seconds = 3600
+
+[router.dhcp.iot]
+pool_offset = 100
+pool_size   = 155
+lease_seconds = 3600
+
+# ---- ACME -------------------------------------------------------------
+
+# Public DNS zone under which per-AP LuCI certificates are issued. Every
+# AP with `cert = true` gets a Let's Encrypt certificate for
+# `<label>.<domain>` (e.g. ax59u.ap.verson.lplr.eu), obtained by the
+# router via the DNS-01 challenge against the OVH zone.
+#
+# The A records for these names are LOCAL ONLY — served from the
+# generated /etc/hosts via systemd-resolved, so the 10.0.0.0/24 topology
+# never appears in public DNS. The only records that ever reach OVH are
+# the ephemeral _acme-challenge TXT records lego creates and deletes
+# during each validation.
+
+[acme]
+domain = "ap.verson.lplr.eu"
+# ACME account contact address (Let's Encrypt expiry notices).
+email  = "ppaysant@gmail.com"
+
+# ---- non-AP devices ---------------------------------------------------
+# Devices with a `mac` get a DHCP reservation (always the same IPv4)
+# plus /etc/hosts + DNS.
+
+[[hosts]]
+name = "nas"
+ipv4 = "10.0.0.10"
+vlan = "lan"
+mac  = "c8:d3:ff:9e:80:c9"
+
+# ---- access points: fleet-wide settings -------------------------------
+
+[aps]
+imagebuilder_base = "https://downloads.openwrt.org/releases"
+timezone = "CET-1CEST,M3.5.0,M10.5.0/3"
+zonename = "Europe/Paris"
+country = "FR"
+
+# Where logd ships logs. The address is not repeated here — it is always
+# the router's own LAN address ([router].lan_ipv4), received directly by
+# VictoriaLogs' native syslog listener.
+syslog_port  = 514
+syslog_proto = "udp"
+
+# DSA port name used as the trunk to the home router on every AP. Both
+# Xiaomi devices expose this port as `wan`; if a future AP differs, add a
+# `trunk_port_alias` key to its own [aps.<label>] table.
+trunk_port_alias = "wan"
+iot_vlan = 30
+
+# Image Builder `PACKAGES=` is built from packages_add ∪ packages_remove
+# ∪ the per-AP extra_packages, deduped while preserving insertion order.
+# A leading `-` removes the package; everything else adds.
+#
+# prometheus-node-exporter-lua exposes node metrics on :9100 for the
+# router's VictoriaMetrics to scrape. The Lua exporter is current on
+# OpenWrt (unlike the stale packaged netdata agent) and light enough for
+# every AP; the -wifi_stations collector adds per-associated-client
+# signal metrics.
+#
+# luci-ssl pulls luci-light + the mbedtls TLS backend (libustream-mbedtls,
+# px5g-mbedtls), matching the fleet's existing mbedtls choice. LuCI is not
+# in any device's default package set, so it has to be added explicitly.
+# The certificate it serves is a real Let's Encrypt one, issued centrally
+# by the router and pushed here — see the futro-ap-certs recipe and the
+# `cert` flag below.
+packages_add = [
+    "wpad-mbedtls",
+    "prometheus-node-exporter-lua",
+    "prometheus-node-exporter-lua-wifi_stations",
+    "luci-ssl",
+]
+packages_remove = [
+    "wpad-basic-mbedtls",
+    "dnsmasq",
+    "odhcpd",
+    "odhcpd-ipv6only",
+    "firewall",
+    "firewall4",
+    "iptables-nft",
+    "ip6tables-nft",
+    "ppp",
+    "ppp-mod-pppoe",
+]
+
+# Each [[aps.ssids]] is one VAP definition broadcast on every
+# non-disabled radio of every AP. `key` is internal (used as part of the
+# generated UCI section name); the visible SSID is `name`. PSKs live
+# out-of-tree under aps/secrets/, gitignored.
+
+[[aps.ssids]]
+key = "trusted"
+name = "maison-jaune"
+network = "lan"            # AP-side UCI interface → br-lan (untagged)
+encryption = "sae"         # WPA3-only; pre-SAE clients can't join
+ieee80211w = "2"           # PMF required (mandatory for SAE)
+psk_secret = "wifi/psk-trusted"
+
+[[aps.ssids]]
+key = "iot"
+name = "maison-jaune-iot"
+network = "iot"            # AP-side UCI interface → br-iot (VLAN 30 trunk)
+encryption = "psk2"        # IoT devices are notoriously bad at WPA3
+ieee80211w = "0"           # PMF off — old kit chokes on it
+psk_secret = "wifi/psk-iot"
+
+# ---- access points ----------------------------------------------------
+#
+# The table key is the AP's *label*: it becomes the short /etc/hosts
+# alias, the certificate's leftmost DNS label, the secrets directory
+# (aps/secrets/tls/<label>/), and the `./aps/build.py <label>` argument.
+#
+# `hostname` is the primary /etc/hosts name. The AP's IPv4 is configured
+# statically on the device itself (`option ipaddr`, generated from `ipv4`
+# below), so no DHCP reservation is involved.
+#
+# `cert = true` opts the AP into the centralised ACME flow: the router
+# issues a certificate for `<label>.<[acme].domain>` and pushes it to the
+# AP, which serves LuCI over HTTPS with it. Omit it and the AP builds
+# with no TLS material and a plain-HTTP LuCI.
+#
+# Radios are listed in order — position in the array becomes radio0,
+# radio1, radio2 in the generated /etc/config/wireless. `disabled = true`
+# emits the wifi-device entry with `option disabled '1'` (so OpenWrt
+# doesn't auto-configure it at first boot) but attaches no VAPs.
+
+[aps.ax3600]
+hostname = "ap-ax3600"
+ipv4     = "10.0.0.2"
+cert     = true
+target   = "qualcommax/ipq807x"
+profile  = "xiaomi_ax3600"
+version  = "25.12.0"
+sha256   = "347898b4dec0e8b3fe771a33c912d7191556251c8b20f19a680b6f35120326d8"
+extra_packages = ["ath11k-firmware-ipq8074"]
+
+[[aps.ax3600.radios]]
+# Legacy PCIe AC card — duplicates 5 GHz spectrum, kept disabled.
+path = "soc/20000000.pci/pci0000:00/0000:00:00.0/0000:01:00.0"
+disabled = true
+
+[[aps.ax3600.radios]]
+path = "platform/soc/c000000.wifi"
+band = "5g"
+htmode = "HE80"
+channel = 36
+
+[[aps.ax3600.radios]]
+path = "platform/soc/c000000.wifi+1"
+band = "2g"
+htmode = "HE40"
+channel = 5
+
+[aps.r3g]
+hostname = "ap-r3g"
+ipv4     = "10.0.0.3"
+cert     = true
+target   = "ramips/mt7621"
+profile  = "xiaomi_mi-router-3g"
+version  = "25.12.0"
+sha256   = "cc4cc7642ea7c26c8d57695466b86ec7c9c837585aa89649f8da700a6fdb1460"
+extra_packages = []
+
+[[aps.r3g.radios]]
+path = "1e140000.pcie/pci0000:00/0000:00:00.0/0000:01:00.0"
+band = "2g"
+htmode = "HT20"
+channel = 1
+
+[[aps.r3g.radios]]
+path = "1e140000.pcie/pci0000:00/0000:00:01.0/0000:02:00.0"
+band = "5g"
+htmode = "VHT80"
+channel = 161
+
+[aps.ax59u]
+hostname = "ap-ax59u"
+ipv4     = "10.0.0.4"
+cert     = true
+target   = "mediatek/filogic"
+profile  = "asus_rt-ax59u"
+version  = "25.12.4"
+sha256   = "8207da9d689f02d42833e4e8abc9eabb4ec63a433a7a26473296d3d2c489e257"
+extra_packages = []
+
+# ASUS RT-AX59U — MediaTek MT7986A (Filogic 830). Single internal MT7976
+# DBDC radio exposes two bands: band0 (2.4 GHz) at the SoC wifi node and
+# band1 (5 GHz) at the same node +1. RF settings mirror r3g.
+
+[[aps.ax59u.radios]]
+path = "platform/18000000.wifi"
+band = "2g"
+htmode = "HT20"
+channel = 1
+
+[[aps.ax59u.radios]]
+path = "platform/18000000.wifi+1"
+band = "5g"
+htmode = "VHT80"
+channel = 161

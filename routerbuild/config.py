@@ -1,10 +1,22 @@
-"""Parse and validate ``hosts.toml`` — the home-network single source of truth.
+"""Parse and validate ``config.toml`` — the home-network single source of truth.
 
-Strict: unknown keys raise ``ConfigError`` with the offending section
-path. IPs must fall in the right VLAN's subnet AND outside the dynamic
-DHCP pool. MACs must be lowercase canonical. Names/aliases must be
-unique across the whole file. Typos in config fail fast at build time
-rather than silently no-op at first boot.
+Covers the whole network: ``[router]``, ``[acme]``, ``[[hosts]]`` for
+ordinary devices, and one ``[aps.<label>]`` table per OpenWrt access
+point. Access points are declared *once*, here — identity and build spec
+together.
+
+This module owns the slice the **router** build needs: everything except
+the AP build spec (target/profile/radios/…), which ``aps/apbuild``
+parses from the same file. That split exists because ``aps/apbuild``
+imports this package, so this package must not import back. The per-AP
+key check still *allow-lists* the build-spec keys, so a typo there fails
+here too rather than being silently ignored.
+
+Strict throughout: unknown keys raise ``ConfigError`` with the offending
+section path. IPs must fall in the right VLAN's subnet AND outside the
+dynamic DHCP pool. MACs must be lowercase canonical. Names, labels and
+aliases must be unique across hosts *and* APs. Typos fail fast at build
+time rather than silently no-op at first boot.
 """
 
 from __future__ import annotations
@@ -41,27 +53,35 @@ class RouterConfig:
     dns_search_domain: str
     dhcp_lan: DhcpRange
     dhcp_iot: DhcpRange
-    # Public DNS zone under which per-AP LuCI certificates are issued
-    # (e.g. "ap.verson.lplr.eu"). Only the ephemeral _acme-challenge TXT
-    # records ever reach the public zone — the A records are local-only,
-    # served from the generated /etc/hosts. Both are None when no host
-    # sets ``ap_cert = true``.
-    ap_cert_domain: str | None = None
-    acme_email: str | None = None
+    # The /64 delegated to br-lan. Referenced in the APs' generated
+    # /etc/config/network; they pick up a GUA from the router's RA.
+    lan_v6_prefix: str
+
+
+@dataclass(frozen=True)
+class AcmeConfig:
+    """Zone + contact for the APs' centrally-issued LuCI certificates.
+
+    Only the ephemeral ``_acme-challenge`` TXT records ever reach the
+    public zone — the A records are local-only, served from the
+    generated ``/etc/hosts``. Absent (``None``) when no AP sets
+    ``cert = true``.
+    """
+
+    domain: str
+    email: str
 
 
 @dataclass(frozen=True)
 class Host:
-    """One device on the home network.
+    """One non-AP device on the home network.
 
     ``mac`` is optional: hosts without a MAC get only ``/etc/hosts`` +
-    DNS entries (no DHCP reservation). Use this for devices that own
-    their own static-IP config (e.g. an OpenWrt AP).
+    DNS entries (no DHCP reservation). Use that for devices that own
+    their own static-IP config.
 
-    ``ap_cert`` opts the host into the centralised ACME flow: the router
-    issues a Let's Encrypt certificate for ``<cert_label>.<ap_cert_domain>``
-    from a CSR baked into the device's own image, then pushes the signed
-    certificate back. The private key never leaves the device.
+    Access points are *not* hosts — they live in ``[aps.<label>]`` and
+    are modelled by :class:`AP`.
     """
 
     name: str
@@ -69,66 +89,86 @@ class Host:
     vlan: str  # "lan" | "iot"
     mac: str | None = None
     aliases: tuple[str, ...] = ()
-    ap_cert: bool = False
-
-    @property
-    def cert_label(self) -> str:
-        """Leftmost label of this host's certificate FQDN.
-
-        Prefers the first alias (``ax59u``) over the full host name
-        (``ap-ax59u``) so the issued name reads ``ax59u.ap.verson.lplr.eu``
-        rather than stuttering ``ap-ax59u.ap.…``.
-        """
-
-        return self.aliases[0] if self.aliases else self.name
-
-    def cert_fqdn(self, router: RouterConfig) -> str:
-        if router.ap_cert_domain is None:
-            raise ConfigError(
-                f"host {self.name!r} sets ap_cert = true but"
-                " [router].ap_cert_domain is not configured"
-            )
-        return f"{self.cert_label}.{router.ap_cert_domain}"
 
 
 @dataclass(frozen=True)
-class HostsConfig:
+class AP:
+    """One OpenWrt access point, from its ``[aps.<label>]`` table.
+
+    ``label`` is the table key (e.g. ``ax59u``) and is the AP's single
+    identifier: the short ``/etc/hosts`` alias, the leftmost label of its
+    certificate FQDN, its secrets directory under ``aps/secrets/``, and
+    the ``./aps/build.py <label>`` argument.
+
+    APs always sit on the trusted ``lan`` bridge and always own their IP
+    statically, so there is no ``vlan`` or ``mac`` field.
+
+    ``cert`` opts the AP into the centralised ACME flow: the router
+    issues a Let's Encrypt certificate for ``<label>.<acme.domain>`` from
+    a CSR baked into the AP's own image, then pushes the signed
+    certificate back. The private key never leaves the AP.
+    """
+
+    label: str
+    hostname: str
+    ipv4: ipaddress.IPv4Address
+    cert: bool = False
+    aliases: tuple[str, ...] = ()
+
+    def cert_fqdn(self, acme: AcmeConfig | None) -> str:
+        if acme is None:
+            raise ConfigError(
+                f"AP {self.label!r} sets cert = true but [acme] is not configured"
+            )
+        return f"{self.label}.{acme.domain}"
+
+
+@dataclass(frozen=True)
+class NetworkConfig:
     router: RouterConfig
     hosts: tuple[Host, ...]
+    aps: tuple[AP, ...]
+    acme: AcmeConfig | None = None
 
     @classmethod
-    def load(cls, path: Path) -> "HostsConfig":
+    def load(cls, path: Path) -> "NetworkConfig":
         if not path.is_file():
-            raise ConfigError(f"hosts.toml not found: {path}")
+            raise ConfigError(f"config.toml not found: {path}")
         try:
             data = tomllib.loads(path.read_text(encoding="utf-8"))
         except tomllib.TOMLDecodeError as exc:
             raise ConfigError(f"{path}: TOML parse error: {exc}") from exc
 
-        _check_keys(data, {"router", "hosts"}, f"{path} (top level)")
+        _check_keys(data, {"router", "acme", "hosts", "aps"}, f"{path} (top level)")
         router = _parse_router(_require_section(data, "router", path))
+
+        acme: AcmeConfig | None = None
+        if "acme" in data:
+            acme = _parse_acme(_require_section(data, "acme", path))
 
         hosts_raw = data.get("hosts", [])
         if not isinstance(hosts_raw, list):
             raise ConfigError(f"{path}: [[hosts]] must be an array of tables")
         hosts = tuple(_parse_host(i, body, router) for i, body in enumerate(hosts_raw))
 
-        _check_uniqueness(hosts)
-        return cls(router=router, hosts=hosts)
+        aps = _parse_aps(data.get("aps", {}), router, acme)
+
+        _check_uniqueness(hosts, aps)
+        return cls(router=router, hosts=hosts, aps=aps, acme=acme)
 
     def hosts_by_vlan(self, vlan: str) -> tuple[Host, ...]:
         return tuple(h for h in self.hosts if h.vlan == vlan)
 
-    def ap_cert_hosts(self) -> tuple[Host, ...]:
-        """Hosts opted into the centralised ACME certificate flow."""
+    def cert_aps(self) -> tuple[AP, ...]:
+        """APs opted into the centralised ACME certificate flow."""
 
-        return tuple(h for h in self.hosts if h.ap_cert)
+        return tuple(a for a in self.aps if a.cert)
 
-    def host_by_name(self, name: str) -> Host:
-        for h in self.hosts:
-            if h.name == name:
-                return h
-        raise ConfigError(f"No [[hosts]] entry with name = {name!r}")
+    def ap_by_label(self, label: str) -> AP:
+        for a in self.aps:
+            if a.label == label:
+                return a
+        raise ConfigError(f"No [aps.{label}] table in the config")
 
 
 # ---- validators --------------------------------------------------------
@@ -149,7 +189,7 @@ def _parse_router(d: dict) -> RouterConfig:
         d,
         {
             "lan_subnet", "lan_ipv4", "iot_subnet", "iot_ipv4",
-            "dns_search_domain", "dhcp", "ap_cert_domain", "acme_email",
+            "dns_search_domain", "dhcp", "lan_v6_prefix",
         },
         section,
     )
@@ -169,34 +209,10 @@ def _parse_router(d: dict) -> RouterConfig:
             " (lowercase letters/digits/hyphen, starting with a letter)"
         )
 
-    # ACME/AP-certificate settings. Both are optional as a pair: omit
-    # them entirely when no host sets `ap_cert = true`.
-    ap_cert_domain: str | None = None
-    if "ap_cert_domain" in d:
-        ap_cert_domain = _req_str(d, "ap_cert_domain", section)
-        if not _DOMAIN_RE.match(ap_cert_domain):
-            raise ConfigError(
-                f"{section}.ap_cert_domain {ap_cert_domain!r} must be a"
-                " lowercase multi-label DNS name (e.g. ap.verson.example.eu)"
-            )
-    acme_email: str | None = None
-    if "acme_email" in d:
-        acme_email = _req_str(d, "acme_email", section)
-        if "@" not in acme_email or acme_email.startswith("@") or acme_email.endswith("@"):
-            raise ConfigError(
-                f"{section}.acme_email {acme_email!r} is not a valid email address"
-            )
-    if (ap_cert_domain is None) != (acme_email is None):
-        raise ConfigError(
-            f"{section}: ap_cert_domain and acme_email must be set together"
-            " (ACME registration needs a contact address)"
-        )
-
     dhcp = _require_section(d, "dhcp", section)
     _check_keys(dhcp, {"lan", "iot"}, f"{section}.dhcp")
     return RouterConfig(
-        ap_cert_domain=ap_cert_domain,
-        acme_email=acme_email,
+        lan_v6_prefix=_req_str(d, "lan_v6_prefix", section),
         lan_subnet=lan_subnet,
         lan_ipv4=lan_ipv4,
         iot_subnet=iot_subnet,
@@ -205,6 +221,143 @@ def _parse_router(d: dict) -> RouterConfig:
         dhcp_lan=_parse_dhcp_range(_require_section(dhcp, "lan", f"{section}.dhcp"), f"{section}.dhcp.lan", lan_subnet),
         dhcp_iot=_parse_dhcp_range(_require_section(dhcp, "iot", f"{section}.dhcp"), f"{section}.dhcp.iot", iot_subnet),
     )
+
+
+def _parse_acme(d: dict) -> AcmeConfig:
+    section = "[acme]"
+    _check_keys(d, {"domain", "email"}, section)
+
+    domain = _req_str(d, "domain", section)
+    if not _DOMAIN_RE.match(domain):
+        raise ConfigError(
+            f"{section}.domain {domain!r} must be a lowercase multi-label"
+            " DNS name (e.g. ap.verson.example.eu)"
+        )
+
+    email = _req_str(d, "email", section)
+    if "@" not in email or email.startswith("@") or email.endswith("@"):
+        raise ConfigError(f"{section}.email {email!r} is not a valid email address")
+
+    return AcmeConfig(domain=domain, email=email)
+
+
+# Keys under [aps] that belong to the *build* side (parsed strictly by
+# aps/apbuild). Listed here only so a typo in an AP table still raises
+# instead of being silently ignored by this parser.
+_AP_BUILD_KEYS = frozenset({
+    "target", "profile", "version", "sha256", "extra_packages", "radios",
+})
+
+# Scalar/array keys directly under [aps] — fleet-wide settings rather
+# than access points. Everything else under [aps] whose value is a table
+# is an AP.
+_APS_FLEET_KEYS = frozenset({
+    "imagebuilder_base", "timezone", "zonename", "country",
+    "syslog_port", "syslog_proto", "trunk_port_alias", "iot_vlan",
+    "packages_add", "packages_remove", "ssids",
+})
+
+
+def _parse_aps(
+    d: object, router: RouterConfig, acme: AcmeConfig | None
+) -> tuple[AP, ...]:
+    """Split ``[aps]`` into fleet settings and per-AP tables.
+
+    The discriminator is the *value type*: a table is an access point, a
+    scalar or array is a fleet-wide setting. That is why the fleet
+    settings are flat and ``ssids`` is an array-of-tables — a nested
+    ``[aps.syslog]`` table would be indistinguishable from an AP labelled
+    ``syslog``.
+    """
+
+    if not d:
+        return ()
+    if not isinstance(d, dict):
+        raise ConfigError("[aps] must be a table")
+
+    aps: list[AP] = []
+    for key, body in d.items():
+        if isinstance(body, dict):
+            aps.append(_parse_ap(key, body, router, acme))
+        elif key not in _APS_FLEET_KEYS:
+            raise ConfigError(
+                f"[aps]: unknown fleet setting {key!r}"
+                f" (known: {sorted(_APS_FLEET_KEYS)}). An access point must be"
+                " a table, i.e. [aps.<label>]."
+            )
+    return tuple(aps)
+
+
+def _parse_ap(
+    label: str, d: dict, router: RouterConfig, acme: AcmeConfig | None
+) -> AP:
+    section = f"[aps.{label}]"
+    if not _NAME_RE.match(label):
+        raise ConfigError(
+            f"{section}: label {label!r} must be lowercase letters/digits/hyphen,"
+            " starting with a letter (it becomes a DNS label)"
+        )
+    _check_keys(
+        d,
+        {"hostname", "ipv4", "cert", "aliases"} | _AP_BUILD_KEYS,
+        section,
+    )
+
+    hostname = _req_str(d, "hostname", section)
+    if not _NAME_RE.match(hostname):
+        raise ConfigError(
+            f"{section}.hostname {hostname!r} must be lowercase"
+            " letters/digits/hyphen, starting with a letter (DNS-label safe)"
+        )
+
+    # APs are always on the trusted bridge and always own their IP
+    # statically, so the checks are the lan-subnet ones only.
+    ipv4 = _parse_ipv4(_req_str(d, "ipv4", section), f"{section}.ipv4")
+    _check_lan_address(ipv4, router, section)
+
+    cert = False
+    if "cert" in d:
+        v = d["cert"]
+        if not isinstance(v, bool):
+            raise ConfigError(f"{section}.cert must be bool, got {type(v).__name__}")
+        cert = v
+    if cert and acme is None:
+        raise ConfigError(f"{section}: cert = true requires an [acme] section")
+
+    aliases: tuple[str, ...] = ()
+    if "aliases" in d:
+        raw = _req_str_list(d, "aliases", section, allow_empty=True)
+        for a in raw:
+            if not _NAME_RE.match(a):
+                raise ConfigError(
+                    f"{section}.aliases: {a!r} must be a DNS-label-safe"
+                    " lowercase identifier"
+                )
+        aliases = tuple(raw)
+
+    return AP(
+        label=label, hostname=hostname, ipv4=ipv4, cert=cert, aliases=aliases
+    )
+
+
+def _check_lan_address(
+    ipv4: ipaddress.IPv4Address, router: RouterConfig, section: str
+) -> None:
+    """Reject an address outside the LAN subnet or inside its DHCP pool."""
+
+    if ipv4 not in router.lan_subnet:
+        raise ConfigError(
+            f"{section}.ipv4 ({ipv4}) outside the lan subnet ({router.lan_subnet})"
+        )
+    host_idx = int(ipv4) - int(router.lan_subnet.network_address)
+    lo = router.dhcp_lan.pool_offset
+    hi = lo + router.dhcp_lan.pool_size - 1
+    if lo <= host_idx <= hi:
+        raise ConfigError(
+            f"{section}.ipv4 ({ipv4}) falls inside the lan dynamic DHCP pool"
+            f" [.{lo}..{hi}] — pick an address outside the pool so the server"
+            " can't hand it out to a different MAC"
+        )
 
 
 def _parse_dhcp_range(d: dict, section: str, subnet: ipaddress.IPv4Network) -> DhcpRange:
@@ -234,7 +387,7 @@ def _parse_host(index: int, d: object, router: RouterConfig) -> Host:
     section = f"[[hosts]] (index {index})"
     if not isinstance(d, dict):
         raise ConfigError(f"{section} must be a table")
-    _check_keys(d, {"name", "ipv4", "vlan", "mac", "aliases", "ap_cert"}, section)
+    _check_keys(d, {"name", "ipv4", "vlan", "mac", "aliases"}, section)
 
     name = _req_str(d, "name", section)
     if not _NAME_RE.match(name):
@@ -283,58 +436,57 @@ def _parse_host(index: int, d: object, router: RouterConfig) -> Host:
                 )
         aliases = tuple(raw)
 
-    ap_cert = False
-    if "ap_cert" in d:
-        v = d["ap_cert"]
-        if not isinstance(v, bool):
-            raise ConfigError(
-                f"{section}.ap_cert must be bool, got {type(v).__name__}"
-            )
-        ap_cert = v
-    if ap_cert:
-        # The router reaches the AP over SSH to push the certificate and
-        # LuCI is an admin surface — both belong on the trusted bridge.
-        if vlan != "lan":
-            raise ConfigError(
-                f"{section}: ap_cert = true requires vlan = 'lan'"
-                f" (got {vlan!r}); the ACME push path runs over the trusted bridge"
-            )
-        if router.ap_cert_domain is None:
-            raise ConfigError(
-                f"{section}: ap_cert = true requires [router].ap_cert_domain"
-                " (and acme_email) to be set"
-            )
-
-    return Host(
-        name=name, ipv4=ipv4, vlan=vlan, mac=mac, aliases=aliases, ap_cert=ap_cert
-    )
+    return Host(name=name, ipv4=ipv4, vlan=vlan, mac=mac, aliases=aliases)
 
 
-def _check_uniqueness(hosts: tuple[Host, ...]) -> None:
+def _check_uniqueness(hosts: tuple[Host, ...], aps: tuple[AP, ...]) -> None:
+    """Enforce one namespace across ``[[hosts]]`` *and* ``[aps.*]``.
+
+    Both end up in the same ``/etc/hosts`` and the same DNS zone, so a
+    name, alias or address may only be claimed once — collisions across
+    the two sections are exactly as broken as collisions within one.
+    """
+
     seen_names: dict[str, str] = {}
     seen_ips: dict[ipaddress.IPv4Address, str] = {}
     seen_macs: dict[str, str] = {}
-    for h in hosts:
-        for label in (h.name, *h.aliases):
-            if label in seen_names:
+
+    # (owner, names it claims, ipv4, mac) for both collections. The owner
+    # string is qualified (host/AP) because a host and an AP may well
+    # share a bare name — that collision is precisely what we're
+    # detecting, so an unqualified owner would make the error unreadable.
+    entries: list[tuple[str, tuple[str, ...], ipaddress.IPv4Address, str | None]] = [
+        *((f"host {h.name!r}", (h.name, *h.aliases), h.ipv4, h.mac) for h in hosts),
+        *(
+            (f"AP {a.label!r}", (a.hostname, a.label, *a.aliases), a.ipv4, None)
+            for a in aps
+        ),
+    ]
+
+    for owner, names, ipv4, mac in entries:
+        # Dedupe within the entry first: an AP whose label equals its
+        # hostname legitimately claims the same string twice. Across
+        # entries, any repeat is an error.
+        for name in dict.fromkeys(names):
+            if name in seen_names:
                 raise ConfigError(
-                    f"name/alias {label!r} declared twice"
-                    f" (first by {seen_names[label]!r}, again by {h.name!r})"
+                    f"name/alias {name!r} declared twice"
+                    f" (first by {seen_names[name]}, again by {owner})"
                 )
-            seen_names[label] = h.name
-        if h.ipv4 in seen_ips:
+            seen_names[name] = owner
+        if ipv4 in seen_ips:
             raise ConfigError(
-                f"IPv4 {h.ipv4} declared twice"
-                f" (first by {seen_ips[h.ipv4]!r}, again by {h.name!r})"
+                f"IPv4 {ipv4} declared twice"
+                f" (first by {seen_ips[ipv4]}, again by {owner})"
             )
-        seen_ips[h.ipv4] = h.name
-        if h.mac is not None:
-            if h.mac in seen_macs:
+        seen_ips[ipv4] = owner
+        if mac is not None:
+            if mac in seen_macs:
                 raise ConfigError(
-                    f"MAC {h.mac} declared twice"
-                    f" (first by {seen_macs[h.mac]!r}, again by {h.name!r})"
+                    f"MAC {mac} declared twice"
+                    f" (first by {seen_macs[mac]}, again by {owner})"
                 )
-            seen_macs[h.mac] = h.name
+            seen_macs[mac] = owner
 
 
 # ---- helpers -----------------------------------------------------------

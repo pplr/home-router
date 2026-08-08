@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Generate the per-AP TLS material for LuCI HTTPS.
 
-For every AP whose ``hosts.toml`` entry sets ``ap_cert = true``, this
+For every AP whose ``[aps.<label>]`` table sets ``cert = true``, this
 writes three files under ``aps/secrets/tls/<cert-label>/``:
 
     key.pem              private key — baked into that AP's image only
-    csr.pem              CSR for <label>.<ap_cert_domain>, signed by the
+    csr.pem              CSR for <label>.<[acme].domain>, signed by the
                          router via lego's --csr mode
     bootstrap-cert.pem   self-signed cert with the same SAN, so LuCI can
                          serve HTTPS before the first push lands
@@ -67,7 +67,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Generate per-AP TLS keys, CSRs and bootstrap certificates.",
         epilog=(
-            "APs with ap_cert = true in hosts.toml: "
+            "APs with cert = true in config.toml: "
             + (", ".join(sorted(certed)) or "(none)")
         ),
     )
@@ -88,7 +88,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if not certed:
         print(
-            "error: no AP has ap_cert = true in hosts.toml — nothing to generate",
+            "error: no AP has cert = true in config.toml — nothing to generate",
             file=sys.stderr,
         )
         return 3

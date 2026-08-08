@@ -20,7 +20,7 @@ do_install:append() {
     install -m 0444 ${UNPACKDIR}/machine-id ${D}${sysconfdir}/machine-id
 }
 
-# Replace upstream /etc/hosts with one generated from hosts.toml so every
+# Replace upstream /etc/hosts with one generated from config.toml so every
 # declared device is reachable by name (and by FQDN under .lan) from the
 # router shell. Attached as a postfunc rather than `python do_install:append`
 # because mixing shell `do_X:append` and `python do_X:append` text-merges
@@ -28,17 +28,17 @@ do_install:append() {
 python do_install_hosts() {
     import pathlib, sys
     sys.path.insert(0, d.getVar("ROUTERBUILD_ROOT"))
-    from routerbuild.config import HostsConfig
+    from routerbuild.config import NetworkConfig
     from routerbuild.render import write_etc_hosts
 
-    cfg = HostsConfig.load(pathlib.Path(d.getVar("HOSTS_TOML")))
+    cfg = NetworkConfig.load(pathlib.Path(d.getVar("CONFIG_TOML")))
     out = pathlib.Path(d.getVar("D") + d.getVar("sysconfdir")) / "hosts"
     write_etc_hosts(cfg, out)
 }
 do_install[postfuncs] += "do_install_hosts"
 
 do_install[file-checksums] += " \
-    ${HOSTS_TOML}:True \
+    ${CONFIG_TOML}:True \
     ${ROUTERBUILD_ROOT}/routerbuild/config.py:True \
     ${ROUTERBUILD_ROOT}/routerbuild/render.py:True \
 "

@@ -84,8 +84,8 @@ whose consumer key is authorised for **just that zone**.
 
 Only the ephemeral `_acme-challenge` TXT records ever reach the public
 zone. The AP `A` records are local-only, served from the router's
-generated `/etc/hosts` — see `ap_cert_domain` in the repo-root
-`hosts.toml`.
+generated `/etc/hosts` — see `[acme].domain` in the repo-root
+`config.toml`.
 
 > Note: AP metrics use no shared secret. The router's VictoriaMetrics scrapes
 > each AP's `prometheus-node-exporter-lua` endpoint (`http://<ap>:9100/metrics`)

@@ -41,7 +41,7 @@ def build_one(name: str, fleet: FleetConfig) -> Path:
     secrets = load_all(fleet.common)
     tls = load_ap_tls(spec)
     if tls is None:
-        print(f"[build] {name}: no ap_cert in hosts.toml — building without TLS")
+        print(f"[build] {name}: no cert = true in config.toml — building without TLS")
 
     print(f"[build] {name}: ensuring Image Builder {spec.version} for {spec.target}")
     imagebuilder_dir = fetch.ensure(spec, fleet.common)

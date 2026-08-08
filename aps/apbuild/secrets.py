@@ -106,7 +106,7 @@ def load_ap_tls(spec: APSpec) -> APTlsSecrets | None:
     """Read this AP's baked TLS key + bootstrap certificate.
 
     Returns ``None`` when the AP is not opted into the certificate flow
-    (no ``ap_cert = true`` on its hosts.toml entry), in which case the
+    (no ``cert = true`` on its [aps.<label>] table), in which case the
     image is built without TLS material and LuCI stays on plain HTTP.
 
     Keyed by ``cert_label`` (the certificate's leftmost DNS label, e.g.
