@@ -7,6 +7,7 @@ SPLASH = ""
 IMAGE_INSTALL:append = " \
     procps \
     iproute2 \
+    iproute2-ss \
     util-linux \
     grep \
     sed \
