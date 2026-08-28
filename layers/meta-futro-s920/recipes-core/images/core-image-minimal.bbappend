@@ -1,3 +1,12 @@
+# core-image-minimal.bb hard-sets IMAGE_LINGUAS = " ", so no locale-base-*
+# package reaches the rootfs and setlocale() can only find glibc's built-in
+# ASCII C locale (btop then refuses to start with "No UTF-8 locale detected").
+# "c" is C.UTF-8: LOCALE_UTF8_IS_DEFAULT = "1" makes libc-package.bbclass drop
+# the .UTF-8 suffix, so the package is locale-base-c and the on-disk name is
+# plain `C` (374805 bytes). This has to live in the bbappend, not local.conf:
+# conf files are parsed before recipes, so a recipe's plain `=` always wins.
+IMAGE_LINGUAS = "c"
+
 IMAGE_INSTALL:append = " rauc sudo systemd-networkd futro-network-conf futro-firewall futro-persistent-state futro-ap-certs victoria-metrics victoria-logs node-exporter systemd-journal-upload chrony tzdata-core openssh-sshd openssh-ssh openssh-sftp-server avahi-daemon avahi-utils kernel-modules kbd kbd-consolefonts kbd-keymaps futro-console-conf linux-firmware-amdgpu linux-firmware-rtl8168 fbset"
 
 # Show boot messages instead of splash screen
