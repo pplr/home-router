@@ -1,0 +1,25 @@
+[Unit]
+Description=Export DHCP server leases as node_exporter textfile metrics
+# The lease files live on the /data-backed bind mount; without the mount we
+# would export the rootfs's stale (empty) directory instead.
+RequiresMountsFor=/var/lib/systemd/network
+After=systemd-networkd.service systemd-tmpfiles-setup.service
+
+# Triggered by dhcp-lease-metrics.path whenever networkd rewrites a lease
+# file; the [Install] section only adds the initial run at boot, since
+# leases persisted on /data are not rewritten until a client next talks.
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/dhcp-lease-metrics.sh
+
+# Hardening — reads the lease JSON, writes one file under /run.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/run/node-exporter/textfile
+ProtectHome=yes
+PrivateTmp=yes
+PrivateNetwork=yes
+
+[Install]
+WantedBy=multi-user.target

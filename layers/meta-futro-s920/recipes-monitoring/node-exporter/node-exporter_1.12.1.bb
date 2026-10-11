@@ -13,6 +13,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 SRC_URI = " \
     https://github.com/prometheus/node_exporter/releases/download/v${PV}/node_exporter-${PV}.linux-amd64.tar.gz \
     file://node-exporter.service \
+    file://node-exporter-textfile.conf \
 "
 SRC_URI[sha256sum] = "b51d8a76aa2a9156a55d501aca6276fae09e262259a5e4e831d2c2222f084e63"
 
@@ -42,9 +43,14 @@ do_install() {
     install -d ${D}${systemd_system_unitdir}
     install -m 0644 ${UNPACKDIR}/node-exporter.service \
         ${D}${systemd_system_unitdir}/node-exporter.service
+
+    install -d ${D}${nonarch_libdir}/tmpfiles.d
+    install -m 0644 ${UNPACKDIR}/node-exporter-textfile.conf \
+        ${D}${nonarch_libdir}/tmpfiles.d/node-exporter.conf
 }
 
 FILES:${PN} = " \
     ${bindir}/node_exporter \
     ${systemd_system_unitdir}/node-exporter.service \
+    ${nonarch_libdir}/tmpfiles.d/node-exporter.conf \
 "

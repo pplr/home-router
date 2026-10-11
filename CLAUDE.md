@@ -337,6 +337,17 @@ are prebuilt upstream Go binaries pinned by `sha256`, packaged under
   per-associated-client signal; binds the AP's `br-lan` address via `listen_interface 'lan'`
   in the generated `/etc/config/prometheus-node-exporter-lua`, written by `apbuild.render`).
 
+**DHCP leases** reach VictoriaMetrics through node_exporter's textfile collector
+(`--collector.textfile.directory=/run/node-exporter/textfile`, directory from a tmpfiles.d entry in
+the `node-exporter` recipe). networkd keeps leases only as JSON in
+`/var/lib/systemd/network/dhcp-server-lease/<bridge>`; the `dhcp-lease-metrics` recipe's `.path`
+unit watches that directory and re-renders it with `jq` into
+`router_dhcp_lease_expiry_timestamp_seconds{bridge,address,mac,hostname}` (value = absolute
+expiry, so no timer is needed — dashboards filter `> time()`). Both units carry
+`RequiresMountsFor=/var/lib/systemd/network`: that directory is a `/data` bind mount, and an
+inotify watch set up before the mount would keep watching the hidden rootfs directory and never
+fire.
+
 The AP scrape target IPs mirror the addresses in repo-root `config.toml` but are
 **inlined in `scrape.yml`** (that recipe doesn't parse `config.toml`) — keep them in sync when
 adding an AP, and give each target an `instance` label (e.g. `ap-ax3600`) so series are

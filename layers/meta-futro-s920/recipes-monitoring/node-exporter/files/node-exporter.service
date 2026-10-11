@@ -9,7 +9,10 @@ Type=simple
 DynamicUser=yes
 # Bind to loopback only: metrics are consumed by the local VictoriaMetrics
 # scrape, never off-box. The APs expose their own :9100 on br-lan instead.
-ExecStart=/usr/bin/node_exporter --web.listen-address=127.0.0.1:9100
+# The textfile directory (tmpfiles.d) carries metrics rendered by other
+# units, e.g. DHCP leases from dhcp-lease-metrics.
+ExecStart=/usr/bin/node_exporter --web.listen-address=127.0.0.1:9100 \
+    --collector.textfile.directory=/run/node-exporter/textfile
 Restart=on-failure
 RestartSec=5
 

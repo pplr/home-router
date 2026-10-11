@@ -1,0 +1,14 @@
+[Unit]
+Description=Watch DHCP server leases for node_exporter
+# inotify watches the directory as it is when the watch is set up: started
+# before the /data bind mount, it would keep watching the hidden rootfs
+# directory underneath and never fire.
+RequiresMountsFor=/var/lib/systemd/network
+
+[Path]
+# networkd replaces <bridge> atomically (temp file + rename) on every lease
+# grant, renewal and release.
+PathChanged=/var/lib/systemd/network/dhcp-server-lease
+
+[Install]
+WantedBy=paths.target

@@ -7,7 +7,7 @@
 # conf files are parsed before recipes, so a recipe's plain `=` always wins.
 IMAGE_LINGUAS = "c"
 
-IMAGE_INSTALL:append = " rauc sudo systemd-networkd futro-network-conf futro-firewall futro-persistent-state futro-ap-certs victoria-metrics victoria-logs node-exporter systemd-journal-upload chrony tzdata-core openssh-sshd openssh-ssh openssh-sftp-server avahi-daemon avahi-utils kernel-modules kbd kbd-consolefonts kbd-keymaps futro-console-conf linux-firmware-amdgpu linux-firmware-rtl8168 fbset"
+IMAGE_INSTALL:append = " rauc sudo systemd-networkd futro-network-conf futro-firewall futro-persistent-state futro-ap-certs victoria-metrics victoria-logs node-exporter dhcp-lease-metrics systemd-journal-upload chrony tzdata-core openssh-sshd openssh-ssh openssh-sftp-server avahi-daemon avahi-utils kernel-modules kbd kbd-consolefonts kbd-keymaps futro-console-conf linux-firmware-amdgpu linux-firmware-rtl8168 fbset"
 
 # Show boot messages instead of splash screen
 SPLASH = ""
