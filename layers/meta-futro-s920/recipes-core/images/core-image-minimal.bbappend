@@ -40,6 +40,7 @@ IMAGE_INSTALL:append = " \
     unzip \
     cpio \
     tcpdump \
+    ethtool \
     btop \
 "
 
