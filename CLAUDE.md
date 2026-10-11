@@ -10,6 +10,16 @@ Minimal Yocto Wrynose (6.0) image for a Fujitsu Futro S920 home router.
 
 ## Build Commands
 
+On NixOS, first enter the dev shell: `nix develop` (or `nix run . -- -c '<cmd>'` for one-shot commands). `flake.nix` builds a `buildFHSEnv` (bubblewrap) sandbox rather than a plain `mkShell`, because bitbake's HOSTTOOLS/uninative and the OpenWrt Image Builder assume a conventional `/usr/bin` + `/lib` layout. It also sets a UTF-8 `LOCALE_ARCHIVE` (bitbake refuses to start without one) and `OVMF_FW` for `scripts/run-qemu.sh`. Since it's a sandboxed sub-shell, it can't be loaded by direnv's `use flake`. If bitbake reports a missing HOSTTOOLS binary or Python module, add it to `targetPkgs`.
+
+Dev-shell constraints (several fixes ported from [OSSystems/yocto-env.nix](https://github.com/OSSystems/yocto-env.nix)):
+
+- **nixpkgs pin vs uninative:** the shell's glibc must not exceed `UNINATIVE_MAXGLIBCVERSION` (`meta/conf/distro/include/yocto-uninative.inc`, 2.43 for Wrynose), or bitbake disables uninative and native sstate stops matching the Yocto mirror. Hence `nixos-26.05` (glibc 2.42), not unstable. Re-check on every nixpkgs bump.
+- **`NIX_DONT_SET_RPATH_<salt>` via `BBPOSTCONF`:** Nix's ld wrapper adds a RUNPATH to its own glibc; native tools linked against uninative's `ld.so` then load Nix's `libc.so.6` and die (`undefined symbol: __nptl_change_stack_perm`, i.e. configure's "cannot run C compiled programs"). The flake hands bitbake a generated conf that exports the opt-out and lists it in `BB_BASEHASH_IGNORE_VARS`. A plain shell export isn't enough: `BB_ENV_PASSTHROUGH_ADDITIONS` copies a variable into the datastore but does not export it to tasks. Keeping this out of `local.conf` keeps that file host-neutral.
+- **`/etc/{passwd,group,shadow}`:** buildFHSEnv symlinks them to the host's, which breaks `groupadd --root` (ELOOP) and lacks the standard accounts. The flake binds writable copies (Debian system accounts + the invoking user) and mounts a tmpfs over `/run/nscd`, since glibc otherwise asks the host's nscd and never reads the files.
+- **`glibc.dev` + `linuxHeaders`:** perl-native's `Errno_pm.PL` needs a real `/usr/include/errno.h`.
+- **`gcc-ar`/`gcc-nm`/`gcc-ranlib`:** Nix's gcc wrapper omits them; the flake links them from the unwrapped gcc. `gcc-ar` is in `HOSTTOOLS_NONFATAL`, so its absence is silent until u-boot-tools-native fails with `gcc-ar: command not found`.
+
 ```bash
 # Initialize build environment (must be run in each new shell)
 source ./layers/openembedded-core/oe-init-build-env build
