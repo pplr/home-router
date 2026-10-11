@@ -373,6 +373,18 @@ by label set, so there are no GUIDs to mint or preserve.)
   `journald-persistent.conf`) — VL is the authoritative long-term store. Upload is
   near-real-time, so the cap never vacuums an entry before it reaches VL.
 
+**Grafana dashboards are generated, not hand-edited.** `monitoring/grafana/build.py` (stdlib
+Python) defines four dashboards — *Router Overview*, *Router Network*, *Access Points*, *Logs* —
+in a "Home Router" folder, and `--push` creates/overwrites them over the HTTP API
+(`GRAFANA_URL`, default `http://nas.lan:30037`; Editor service-account token in
+`GRAFANA_TOKEN` or `~/.config/grafana-token`). Edits made in the Grafana UI are lost on the next
+push. AP hostnames, radio bands, SSID names, the trunk port alias and host MACs come from
+`config.toml` via the `apbuild`/`routerbuild` parsers, so adding an AP or renaming an SSID only
+needs a re-push. Wi-Fi VAP labels assume OpenWrt's `phy<radio index>-ap<ssid index>` naming.
+Datasources are bound through `${ds_metrics}`/`${ds_logs}` variables (by plugin type), never by
+UID. Router logs (journald: `_HOSTNAME`, `SYSLOG_IDENTIFIER`) and AP logs (syslog: `hostname`,
+`app_name`) are folded into common `host`/`source` fields with LogsQL `format` pipes.
+
 **Firewall: no change needed.** Every consumer is on the fully-trusted `br-lan`, already
 covered by `iifname "br-lan" accept`: APs → VL `:514`, Grafana host → VM `:8428` + VL `:9428`,
 and VM → node_exporter is `127.0.0.1`. IoT stays default-drop (no VM/VL access). Retention is a
