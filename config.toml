@@ -100,6 +100,14 @@ ipv4 = "10.0.0.10"
 vlan = "lan"
 mac  = "c8:d3:ff:9e:80:c9"
 
+# Brother DCP-L2520DW on the IoT SSID. MAC taken from its mDNS hostname
+# (BRW30F7724A0DF1 = Brother wireless + MAC).
+[[hosts]]
+name = "printer"
+ipv4 = "10.0.30.10"
+vlan = "iot"
+mac  = "30:f7:72:4a:0d:f1"
+
 # ---- access points: fleet-wide settings -------------------------------
 
 [aps]
